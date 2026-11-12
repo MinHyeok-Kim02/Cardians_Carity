@@ -30,7 +30,10 @@ class PleosSteeringSource(context: Context, private val update: (Float?, Float?)
                 main.post {
                     if (vehicle === sdk) {
                         val angle = value?.takeIf { it.isFinite() }
-                        update(angle, angle?.let { (it / range).coerceIn(-1f, 1f) })
+                        val normalized = PleosSteeringMapping.toSimulation(angle, range)
+                        update(angle, normalized)
+                        if ((context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+                            Log.d("CarTalkSteering", "raw=$angle normalized=$normalized receivedAt=${android.os.SystemClock.elapsedRealtime()} source=PLEOS")
                     }
                 }
             }

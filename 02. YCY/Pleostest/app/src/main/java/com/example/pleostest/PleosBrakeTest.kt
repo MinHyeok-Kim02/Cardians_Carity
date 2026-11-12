@@ -16,6 +16,7 @@ class PleosBrakeTest(private val context: Context, private val onStatus: (Boolea
     private var vehicle: Vehicle? = null
     private var brake: Brake? = null
     private var listener: BrakePedalStatusListener? = null
+    private var poll: Runnable? = null
 
     fun start() {
         if (vehicle != null) return
@@ -77,6 +78,30 @@ class PleosBrakeTest(private val context: Context, private val onStatus: (Boolea
                 },
                 onFailed = { Log.e(TAG, "Brake initial read failed; Brake = UNKNOWN", it) }
             )
+            // Refresh held states too; only release -> press edges count in the macro gate.
+            val refresh = object : Runnable {
+                override fun run() {
+                    if (vehicle !== sdk) return
+                    fun received(status: Boolean?) {
+                        handler.post {
+                            if (vehicle === sdk) {
+                                logStatus(status, "REFRESH")
+                                handler.postDelayed(this, 1000)
+                            }
+                        }
+                    }
+                    try {
+                        api.getCurrentBrakePedalStatus(
+                            onComplete = { received(it) },
+                            onFailed = { received(null); Log.w(TAG, "Brake refresh failed", it) }
+                        )
+                    } catch (e: Exception) {
+                        received(null); Log.w(TAG, "Brake refresh failed", e)
+                    }
+                }
+            }
+            poll = refresh
+            handler.postDelayed(refresh, 1000)
         } catch (e: Exception) {
             Log.e(TAG, "Brake read/registration failed; Brake = UNKNOWN", e)
         }
@@ -95,6 +120,7 @@ class PleosBrakeTest(private val context: Context, private val onStatus: (Boolea
     fun stop() {
         val sdk = vehicle ?: return
         vehicle = null
+        poll?.let { handler.removeCallbacks(it) }; poll = null
         onStatus(null)
         try {
             listener?.let { brake?.unregisterBrakePedalStatus(it) }

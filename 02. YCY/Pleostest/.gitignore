@@ -14,6 +14,7 @@ local.properties
 
 # Local captures and logs
 /captures/
+/alley3d-verification.png
 *.log
 
 # Generated Android packages

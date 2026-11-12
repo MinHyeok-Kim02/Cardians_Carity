@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
     <uses-permission android:name="pleos.car.permission.CONTROL_CAR_LIGHTS" />
     <uses-permission android:name="pleos.car.permission.CONTROL_CAR_WINDOWS" />
@@ -9,7 +10,7 @@
     <uses-permission android:name="pleos.car.permission.CONTROL_CAR_CLIMATE" />
     <uses-permission android:name="pleos.car.permission.CAR_TOLL" />
     <!-- Emulator development only; release does not declare DO. -->
-    <application>
+    <application android:usesCleartextTraffic="true">
         <activity android:name=".MainActivity">
             <meta-data android:name="distractionOptimized" android:value="true" />
         </activity>
