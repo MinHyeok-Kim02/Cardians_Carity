@@ -1,0 +1,43 @@
+# Local Android SDK paths
+local.properties
+
+# Gradle / Kotlin caches and generated build output
+.gradle/
+.kotlin/
+**/build/
+.externalNativeBuild/
+.cxx/
+
+# Personal Android Studio / IntelliJ configuration
+.idea/
+*.iml
+
+# Local captures and logs
+/captures/
+*.log
+
+# Generated Android packages
+*.apk
+*.aab
+*.apks
+
+# Signing keys and local signing configuration
+*.jks
+*.keystore
+!**/debug.keystore
+keystore.properties
+
+# Local secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+secrets.properties
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Source files, src/debug, Gradle Wrapper (including its JAR),
+# shared Gradle configuration, and project documents remain trackable.
