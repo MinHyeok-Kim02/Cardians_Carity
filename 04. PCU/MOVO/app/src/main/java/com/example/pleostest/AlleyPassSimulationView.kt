@@ -17,7 +17,7 @@ import android.widget.*
 import java.util.Locale
 import kotlin.math.abs
 
-/** Full application-window 3D scene with bounded HUD and bottom controls. */
+/** Shared YCY vehicle information bar, 50:50 alley/cabin and existing bottom controls. */
 class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout(context) {
     private val ink = Color.rgb(235, 243, 250)
     private val muted = Color.rgb(170, 190, 205)
@@ -25,6 +25,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private val world = AlleyWorld()
     private val gate = AlleyMacroGate()
     private val map = Alley3dView(context)
+    private val vehicleInfo = VehicleInfoPanel(context, compact = true)
     private val coach = AlleyVoiceCoach(context)
     private val sideWarning = SideClearanceWarning()
     private val interior = InteriorDemoView(context)
@@ -51,6 +52,8 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private val title = label("ALLEY PASS  ·  SIMULATION", 15, teal)
     private val vehicleText = label("", 23)
     private val inputText = label("", 14, muted)
+    private val keyboardInputText = label("", 13, teal).apply { visibility = View.GONE }
+    private var lastKeyboardInput = "키 입력 대기 · 앱 화면 클릭 후 ↑/W를 길게 누르세요"
     private val warning = label("", 22)
     private val detail = label("", 14, muted)
     private val leftGap = label("", 18)
@@ -78,6 +81,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private var demoComplete = false
     private var speed: Float? = null
     private var steering: Float? = null
+    private var rawSteering: Float? = null
     private var brake: Boolean? = null
     private var speedAt = 0L
     private var steeringAt = 0L
@@ -156,6 +160,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         }
         val layout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         addView(layout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        layout.addView(vehicleInfo, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         val split = LinearLayout(context)
         layout.addView(split, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         val alleyPane = FrameLayout(context)
@@ -186,7 +191,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         }
         cabinPane.addView(ambientToggle)
         title.setTypeface(title.typeface, Typeface.BOLD)
-        hud.addView(title); hud.addView(vehicleText); hud.addView(inputText)
+        hud.addView(title); hud.addView(vehicleText); hud.addView(inputText); hud.addView(keyboardInputText)
         val gaps = LinearLayout(context).apply {
             addView(leftGap, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             addView(rightGap, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
@@ -214,6 +219,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
                 val current = motion(SystemClock.elapsedRealtime()).speed
                 consoleDriver.select(value, current)
                 consoleMessage = value.name + " 요청 · 수신 확인 중"
+                if (keyboardMode) requestFocus()
                 render(SystemClock.elapsedRealtime())
             }
             gearButtons[value] = button
@@ -278,6 +284,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private fun prepareKeyboard() {
         prepareScene(false)
         keyboardMode = true
+        lastKeyboardInput = "키 입력 대기 · Running Devices 앱 화면에서 ↑/W 길게"
         consoleDriver.start()
         requestFocus()
     }
@@ -295,14 +302,23 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     fun handleDrivingKey(event: KeyEvent): Boolean {
         if (!active || !keyboardMode || !debugEmulator) return false
         val control = when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> AlleyKeyboardDriver.Control.ACCELERATE
-            KeyEvent.KEYCODE_DPAD_DOWN -> AlleyKeyboardDriver.Control.BRAKE
-            KeyEvent.KEYCODE_DPAD_LEFT -> AlleyKeyboardDriver.Control.LEFT
-            KeyEvent.KEYCODE_DPAD_RIGHT -> AlleyKeyboardDriver.Control.RIGHT
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_W -> AlleyKeyboardDriver.Control.ACCELERATE
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_S -> AlleyKeyboardDriver.Control.BRAKE
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_A -> AlleyKeyboardDriver.Control.LEFT
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_D -> AlleyKeyboardDriver.Control.RIGHT
             KeyEvent.KEYCODE_SPACE -> AlleyKeyboardDriver.Control.STOP
             else -> null
         }
         if (control == null && event.keyCode != KeyEvent.KEYCODE_R) return false
+        if (event.repeatCount == 0 || event.action == KeyEvent.ACTION_UP) {
+            val accepted = active && windowFocused && consoleDriver.connected
+            val action = if(event.action == KeyEvent.ACTION_UP) "KEY_UP" else "KEY_DOWN"
+            lastKeyboardInput = "${KeyEvent.keyCodeToString(event.keyCode)} " +
+                (if(event.action == KeyEvent.ACTION_UP) "뗌" else "눌림") +
+                if(accepted) " · 키 수신됨" else " · 연결/포커스 확인 필요"
+            android.util.Log.i("CarTalkKeyboard",
+                "$action code=${event.keyCode} control=$control accepted=$accepted running=$running")
+        }
         if (event.action == KeyEvent.ACTION_UP) {
             if (control != null) consoleDriver.release(control)
             if (event.isCanceled) consoleDriver.stop()
@@ -355,7 +371,8 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     fun updateSpeed(value: Float?) { speed = value?.takeIf { it.isFinite() }; speedAt = SystemClock.elapsedRealtime() }
     fun updateBrake(value: Boolean?) { brake = value; brakeAt = SystemClock.elapsedRealtime() }
     fun updateSteering(raw: Float?, normalized: Float?) {
-        steering = normalized?.takeIf { raw?.isFinite() == true && it.isFinite() }
+        rawSteering = raw?.takeIf { it.isFinite() }
+        steering = normalized?.takeIf { rawSteering != null && it.isFinite() }
         steeringAt = SystemClock.elapsedRealtime()
     }
     fun updateRestrictions(value: Boolean) {
@@ -371,7 +388,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         else {
             endAmbientDemo()
             running = false; scenarioStarted = false; gate.reset(); cancelMacro(); consoleDriver.stop()
-            map.onPause(); coach.stop(); speed = null; steering = null; brake = null
+            map.onPause(); coach.stop(); speed = null; steering = null; rawSteering = null; brake = null
         }
     }
 
@@ -421,6 +438,13 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         val input = motion(now)
         val v = input.speed; val angle = input.steering
         val gap = world.clearance(); lastGap = gap; map.publish(world, gap)
+        vehicleInfo.render(
+            speed?.takeIf { now - speedAt <= 3000 }?.let { abs(it) * 3.6f },
+            rawSteering?.takeIf { now - steeringAt <= 3000 },
+            freshGear(now)?.name,
+            brake?.takeIf { now - brakeAt <= 3000 },
+            restricted, demoMode
+        )
         publishFeature2(now, gap)
         if (macroBusy && (world.contact || gap.meters <= .3 || !stoppedForMacro()))
             cancelMacro("가상 매크로 취소 · 근접 경고 또는 정차·브레이크 상태를 확인하세요")
@@ -432,6 +456,8 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             cancelMacro("감지 유효시간 만료 · 다시 시연하거나 조건을 확인하세요")
         vehicleText.show((v?.let { String.format(Locale.KOREA, "%.1f km/h", abs(it) * 3.6) } ?: "속도 수신 대기") +
             if (keyboardMode) "  ·  Console → SDK 수신" else if (demoMode) "  ·  가상 입력" else "  ·  차량 SDK 입력")
+        keyboardInputText.visibility = if (keyboardMode) View.VISIBLE else View.GONE
+        keyboardInputText.show(lastKeyboardInput)
         inputText.show("조향 " + when {
             angle == null -> "미확인"; angle < -.02 -> "왼쪽"; angle > .02 -> "오른쪽"; else -> "중앙"
         } + "  ·  브레이크 " + when (input.brake) { true -> "눌림"; false -> "해제"; null -> "미확인" } +
@@ -458,7 +484,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             else -> "주변을 확인하며 천천히 이동하세요"
         }
         warning.show(message); warning.setTextColor(if (world.contact || gap.meters <= .3) Color.rgb(255, 127, 127) else ink)
-        detail.show(if (keyboardMode) consoleMessage + " · 기어 수신 " + (freshGear(now)?.name ?: "미확인") + " · ↑가속 ↓브레이크 ←/→조향"
+        detail.show(if (keyboardMode) consoleMessage + " · 기어 수신 " + (freshGear(now)?.name ?: "미확인") + " · ↑/W 길게 가속 · ↓/S 브레이크 · ←A/→D 조향 · Space 정지"
             else if (demoMode) "앱 내부 가상 시연 · 차량 SDK 값이나 Console 상태를 바꾸지 않습니다."
             else "가상 최근접 ${String.format(Locale.KOREA, "%.2f", gap.meters)}m · ${gap.side}")
         macroStatus.show(if (macroMessage.isNotEmpty()) macroMessage else when {

@@ -22,7 +22,11 @@ class AlleyKeyboardDriver {
             Control.ACCELERATE in held -> .65
             else -> -.35
         }
-        speedMps = (speedMps + acceleration * dt).coerceIn(0.0, 6.0 / 3.6)
+        // Console receives integer km/h. A short initial key press must not round back to zero.
+        // This is an emulator input command only; world movement still waits for AAOS readback.
+        val initial = if (!brake && Control.ACCELERATE in held && speedMps == 0.0)
+            1.0 / 3.6 else speedMps
+        speedMps = (initial + acceleration * dt).coerceIn(0.0, 6.0 / 3.6)
         val target = when {
             (Control.LEFT in held) == (Control.RIGHT in held) -> 0.0
             Control.LEFT in held -> -1.0

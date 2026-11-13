@@ -30,6 +30,7 @@ class PleosConsoleDriver(context: Context, private val update: (String) -> Unit)
     private var previousMode: String?=null
     private var ownsControls=false
     private var lastLoggedSteering: Int?=null
+    private var lastLoggedControls: String?=null
     val connected get()=gear!=null && SystemClock.elapsedRealtime()-readAt<2500
     fun press(key: AlleyKeyboardDriver.Control) { if(connected) model.press(key) }
     fun release(key: AlleyKeyboardDriver.Control) { model.release(key) }
@@ -51,6 +52,11 @@ class PleosConsoleDriver(context: Context, private val update: (String) -> Unit)
     private fun state()=JSONObject(request("/vehicle/state"))
     private fun controls(command: ConsoleDriveModel.Command) {
         val requestedAt=SystemClock.elapsedRealtime()
+        val commandKey = "${Math.round(command.speedKph)}/${command.accelerator}/${command.brake}/${command.steering}"
+        if (lastLoggedControls != commandKey) {
+            Log.i("CarTalkKeyboard", "CONTROL_REQUEST speedKmh=${Math.round(command.speedKph)} accelerator=${command.accelerator} brake=${command.brake} steering=${command.steering}")
+            lastLoggedControls=commandKey
+        }
         request("/vehicle/controls?speed="+Math.round(command.speedKph).toString()+
             "&accelerator="+command.accelerator+"&brake="+command.brake+"&steering="+command.steering,"PUT")
         if(lastLoggedSteering!=command.steering) {

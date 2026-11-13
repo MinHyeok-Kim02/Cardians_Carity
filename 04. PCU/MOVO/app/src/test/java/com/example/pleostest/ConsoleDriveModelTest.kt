@@ -5,6 +5,26 @@ import com.example.pleostest.ConsoleDriveModel.Gear.*
 import com.example.pleostest.AlleyKeyboardDriver.Control.*
 
 class ConsoleDriveModelTest {
+    @Test fun briefThrottleProducesVisibleConsoleSpeedAndThenCoastsToRest() {
+        val m=ConsoleDriveModel()
+        assertTrue(m.select(D,0.0))
+        m.press(ACCELERATE)
+        assertTrue(Math.round(m.tick(.1).speedKph)>=1)
+        m.release(ACCELERATE)
+        assertTrue(Math.round(m.tick(.1).speedKph)>=1)
+        repeat(40) { m.tick(.1) }
+        assertEquals(0.0,m.tick(.1).speedKph,0.0)
+    }
+    @Test fun brakePreventsInitialThrottleKick() {
+        val m=ConsoleDriveModel(); m.select(D,0.0)
+        m.press(ACCELERATE); m.press(BRAKE)
+        assertEquals(0.0,m.tick(.1).speedKph,0.0)
+        assertEquals(100,m.tick(.1).brake)
+    }
+    @Test fun selectingDriveAloneDoesNotAccelerate() {
+        val m=ConsoleDriveModel(); assertTrue(m.select(D,0.0))
+        repeat(20) { assertEquals(0.0,m.tick(.1).speedKph,0.0) }
+    }
     @Test fun driveSelectionIsLatchedWithoutHoldingGear() {
         val m=ConsoleDriveModel(); assertTrue(m.select(D,0.0)); m.press(ACCELERATE)
         repeat(20) { m.tick(.1) }
