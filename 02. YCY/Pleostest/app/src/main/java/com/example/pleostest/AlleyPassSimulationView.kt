@@ -17,7 +17,7 @@ import android.widget.*
 import java.util.Locale
 import kotlin.math.abs
 
-/** Full application-window 3D scene with bounded HUD and bottom controls. */
+/** Single app window: shared HUD, 70/30 3D and PCU information panels, bottom controls. */
 class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout(context) {
     private val ink = Color.rgb(235, 243, 250)
     private val muted = Color.rgb(170, 190, 205)
@@ -25,6 +25,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private val world = AlleyWorld()
     private val gate = AlleyMacroGate()
     private val map = Alley3dView(context)
+    private val vehicleInfo = VehicleInfoPanel(context)
     private val coach = AlleyVoiceCoach(context)
     private var consoleMessage = "Console 연결 대기"
     private var sdkGear: ConsoleDriveModel.Gear? = null
@@ -71,6 +72,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private var demoComplete = false
     private var speed: Float? = null
     private var steering: Float? = null
+    private var rawSteering: Float? = null
     private var brake: Boolean? = null
     private var speedAt = 0L
     private var steeringAt = 0L
@@ -146,7 +148,20 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             demoMode = restored.getBoolean("demo.mode", false) && debugEmulator
             demoSeconds = restored.getDouble("demo.seconds", 0.0).takeIf { it.isFinite() }?.coerceIn(0.0, 10.0) ?: 0.0
         }
-        addView(map, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        val layout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        addView(layout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        val top = FrameLayout(context)
+        layout.addView(top, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        val scene = LinearLayout(context).apply {
+            clipChildren = true
+            clipToPadding = true
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+        }
+        layout.addView(scene, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        scene.addView(map, LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 7f))
+        scene.addView(vehicleInfo, LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 3f).apply {
+            leftMargin = dp(8)
+        })
         title.setTypeface(title.typeface, Typeface.BOLD)
         hud.addView(title); hud.addView(vehicleText); hud.addView(inputText)
         val gaps = LinearLayout(context).apply {
@@ -154,7 +169,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             addView(rightGap, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         }
         hud.addView(gaps); hud.addView(warning); hud.addView(detail)
-        addView(hud, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
+        top.addView(hud, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
             setMargins(dp(14), dp(12), dp(14), 0)
         })
         macroBanner.addView(bannerProgress)
@@ -164,7 +179,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         macroBanner.addView(headline)
         macroBanner.addView(bannerDetail); macroBanner.addView(bannerFooter)
         macroBanner.visibility = View.GONE
-        addView(macroBanner, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
+        top.addView(macroBanner, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
             setMargins(dp(14), dp(12), dp(14), 0)
         })
         val controls = panel()
@@ -221,7 +236,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         for (button in listOf(start, demo, keyboard, reset, macro)) actions.addView(button, buttonParams())
         controls.addView(actions)
         controls.addView(label("키보드는 Pleos 에뮬레이터에 반영됩니다. 거리·미러·창문·비상등 매크로는 가상입니다.", 12, muted))
-        addView(controls, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
+        layout.addView(controls, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
             setMargins(dp(14), 0, dp(14), dp(12))
         })
         render(SystemClock.elapsedRealtime())
@@ -313,7 +328,8 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     fun updateSpeed(value: Float?) { speed = value?.takeIf { it.isFinite() }; speedAt = SystemClock.elapsedRealtime() }
     fun updateBrake(value: Boolean?) { brake = value; brakeAt = SystemClock.elapsedRealtime() }
     fun updateSteering(raw: Float?, normalized: Float?) {
-        steering = normalized?.takeIf { raw?.isFinite() == true && it.isFinite() }
+        rawSteering = raw?.takeIf { it.isFinite() }
+        steering = normalized?.takeIf { rawSteering != null && it.isFinite() }
         steeringAt = SystemClock.elapsedRealtime()
     }
     fun updateRestrictions(value: Boolean) {
@@ -328,7 +344,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         if (value) { map.onResume(); coach.start(); main.post(frame) }
         else {
             running = false; scenarioStarted = false; gate.reset(); cancelMacro(); consoleDriver.stop()
-            map.onPause(); coach.stop(); speed = null; steering = null; brake = null
+            map.onPause(); coach.stop(); speed = null; steering = null; rawSteering = null; brake = null
         }
     }
 
@@ -377,6 +393,13 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private fun render(now: Long) {
         val input = motion(now)
         val v = input.speed; val angle = input.steering
+        vehicleInfo.render(
+            speed?.takeIf { now - speedAt <= 3000 }?.let { abs(it) * 3.6f },
+            rawSteering?.takeIf { now - steeringAt <= 3000 },
+            freshGear(now)?.name,
+            brake?.takeIf { now - brakeAt <= 3000 },
+            restricted, demoMode
+        )
         val gap = world.clearance(); lastGap = gap; map.publish(world, gap)
         if (macroBusy && (world.contact || gap.meters <= .3 || !stoppedForMacro()))
             cancelMacro("가상 매크로 취소 · 근접 경고 또는 정차·브레이크 상태를 확인하세요")
