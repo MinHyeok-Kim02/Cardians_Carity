@@ -23,6 +23,7 @@ class VehicleInfoPanel(context: Context, private val compact: Boolean = false) :
     private val gearAndBrake: TextView
     private val state: TextView
     private val source: TextView
+    private val summary = text("On-sense · 차량 연결 대기", 16, ink)
 
     init {
         orientation = if (compact) HORIZONTAL else VERTICAL
@@ -45,6 +46,11 @@ class VehicleInfoPanel(context: Context, private val compact: Boolean = false) :
         metadata.addView(gearAndBrake)
         state = text("차량 상태 확인 중", 12, muted)
         metadata.addView(state)
+        if(compact) {
+            removeAllViews()
+            setPadding(dp(12),dp(3),dp(12),dp(3))
+            addView(summary,LayoutParams(LayoutParams.MATCH_PARENT,dp(36)))
+        }
     }
 
     private fun column(weight: Float) = LinearLayout(context).apply {
@@ -75,7 +81,11 @@ class VehicleInfoPanel(context: Context, private val compact: Boolean = false) :
     }
 
     fun render(speedKph: Float?, rawSteering: Float?, gear: String?, brake: Boolean?,
-               restricted: Boolean, syntheticScene: Boolean) {
+               restricted: Boolean, syntheticScene: Boolean, sceneSpeedKph: Float? = null) {
+        summary.show("On-sense   " + (if(syntheticScene) "시연 " else "") +
+            ((if(syntheticScene) sceneSpeedKph else speedKph)?.let { String.format(Locale.KOREA,"%.1f km/h",it) } ?: "-- km/h") +
+            "   " + (gear ?: "--") + "   ·   " + (if(speedKph!=null && rawSteering!=null) "SDK 연결" else "수신 대기") +
+            (if(syntheticScene) " · 가상 시연" else "") + (if(restricted) " · 주행 제한" else ""))
         speedValue.show(speedKph?.let { String.format(Locale.KOREA, "%.1f", it) } ?: "--")
         steeringValue.show(rawSteering?.let { String.format(Locale.KOREA, "%+.1f", it) } ?: "--")
         direction.show(when {

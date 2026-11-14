@@ -25,14 +25,24 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private val world = AlleyWorld()
     private val gate = AlleyMacroGate()
     private val map = Alley3dView(context)
+    private var diagnostics = false
+    private val diagnosticsButton = Button(context)
+    private val diagnosticsPanel = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; visibility=GONE }
+    private val locationBar = LinearLayout(context)
+    private val sdkDiagnostics = label("",12,muted)
+    private val sceneCaption = label("3D 가상 거리 · 실내 조명 연출",12,muted)
     private val vehicleInfo = VehicleInfoPanel(context, compact = true)
+    private val locationStatus = label("위치 SDK 확인 대기 · 외부 전송 없음", 13, muted).apply { maxLines = 3 }
+    private val locationControl = Button(context)
+    private var locationAction: (() -> Unit)? = null
     private val coach = AlleyVoiceCoach(context)
     private val sideWarning = SideClearanceWarning()
     private val interior = InteriorDemoView(context)
     private val guides = ClearanceGuideView(context)
-    private val ambientStatus = label("차량 조명 연동 꺼짐 · 적용 미확인", 12, muted).apply { maxLines = 8 }
+    private val ambientStatus = label("차량 조명 연동 꺼짐 · 적용 미확인", 12, muted).apply { maxLines = 3 }
     private val ambientToggle = androidx.appcompat.widget.SwitchCompat(context)
-    private val ambient = AmbientLightBridge(context) { ambientStatus.show(it) }
+    private val ambientDiagnostics=label("",11,muted).apply { maxLines=6 }
+    private val ambient=AmbientLightBridge(context,::showAmbientStatus)
     private var lastWarningPair: Pair<SideClearanceWarning.Level, SideClearanceWarning.Level>? = null
     private var consoleMessage = "Console 연결 대기"
     private var sdkGear: ConsoleDriveModel.Gear? = null
@@ -120,63 +130,155 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private val frame = object : Runnable {
         override fun run() {
             if (!active) return
-            val now = SystemClock.elapsedRealtime()
-            val dt = if (lastFrame == 0L) 0.0 else ((now - lastFrame) / 1000.0).coerceAtMost(.1)
-            lastFrame = now
-            if (restricted && !emulator) running = false
-            if (running && demoMode) demoSeconds += dt
-            val input = motion(now)
-            if (running && input.speed != null && input.steering != null &&
-                (world.simulationSeconds > 0 || abs(input.speed) > .01))
-                world.advance(dt, input.speed, input.steering)
-            if (demoMode && demoSeconds >= AlleyDemoScenario.DURATION_SECONDS) {
-                demoComplete = true; running = false; endAmbientDemo()
-            }
-            if (world.contact || world.y >= 74) {
-                running = false; endAmbientDemo()
-                if (keyboardMode && consoleDriver.connected) consoleDriver.stop()
-            }
-            map.publish(world, lastGap)
-            publishFeature2(now, lastGap)
-            if (running && now - lastLog >= 1000) {
-                android.util.Log.d("CarTalkAlley", "x=${world.x} y=${world.y} heading=${world.heading} speed=${input.speed} steering=${input.steering} source=${if (keyboardMode) "CONSOLE_SDK" else if (demoMode) "SYNTHETIC" else "SDK"}")
-                lastLog = now
-            }
-            if (now - lastLabels >= 200) { render(now); lastLabels = now }
+            tickFrame(SystemClock.elapsedRealtime())
             main.postDelayed(this, 50)
         }
     }
 
+    /** One 50ms tick: preserve input -> movement -> warnings -> labels ordering. */
+    private fun tickFrame(now: Long) {
+        val dt=frameDelta(now)
+        if(restricted && !emulator) running=false
+        if(running && demoMode) demoSeconds+=dt
+        val input=motion(now)
+        advanceWorld(dt,input)
+        finishSceneIfNeeded()
+        lastGap=displayedClearance()
+        map.publish(world,lastGap)
+        publishFeature2(now,lastGap)
+        logMotion(now,input)
+        if(now-lastLabels>=200) { render(now); lastLabels=now }
+    }
+
+    private fun frameDelta(now: Long): Double {
+        val dt=if(lastFrame==0L) 0.0 else ((now-lastFrame)/1000.0).coerceAtMost(.1)
+        lastFrame=now
+        return dt
+    }
+
+    private fun advanceWorld(dt: Double,input: Motion) {
+        if(running && input.speed!=null && input.steering!=null &&
+            (world.simulationSeconds>0 || abs(input.speed)>.01)) world.advance(dt,input.speed,input.steering)
+    }
+
+    private fun finishSceneIfNeeded() {
+        if(running && demoMode && demoSeconds>=AlleyDemoScenario.DURATION_SECONDS) {
+            demoComplete=true; running=false; endAmbientDemo()
+        }
+        if(running && (world.contact || world.y>=74)) {
+            running=false; endAmbientDemo()
+            if(keyboardMode && consoleDriver.connected) consoleDriver.stop()
+        }
+    }
+
+    private fun logMotion(now: Long,input: Motion) {
+        if(!running || now-lastLog<1000) return
+        android.util.Log.d("CarTalkAlley","x=${world.x} y=${world.y} heading=${world.heading} speed=${input.speed} steering=${input.steering} source=${if(keyboardMode) "CONSOLE_SDK" else if(demoMode) "SYNTHETIC" else "SDK"}")
+        lastLog=now
+    }
+
     init {
+        configureRoot()
+        restoreState(restored)
+        buildLayout()
+        render(SystemClock.elapsedRealtime())
+    }
+
+    private fun configureRoot() {
         clipChildren = true; clipToPadding = true
         isFocusableInTouchMode = true
         setBackgroundColor(Color.rgb(11, 20, 32))
+    }
+
+    /** Restores pose and demo timing without automatically resuming motion. */
+    private fun restoreState(restored: Bundle?) {
         if (restored != null) {
             world.restore(restored.getDouble("world.x", 0.0), restored.getDouble("world.y", 4.0),
                 restored.getDouble("world.heading", 0.0), restored.getBoolean("world.contact", false),
                 restored.getDouble("world.seconds", 0.0))
             demoMode = restored.getBoolean("demo.mode", false) && debugEmulator
-            demoSeconds = restored.getDouble("demo.seconds", 0.0).takeIf { it.isFinite() }?.coerceIn(0.0, 10.0) ?: 0.0
+            demoSeconds = restored.getDouble("demo.seconds", 0.0).takeIf { it.isFinite() }?.coerceIn(0.0, AlleyDemoScenario.DURATION_SECONDS) ?: 0.0
         }
-        val layout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+    }
+
+    private fun buildLayout() {
+        val layout=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
         addView(layout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         layout.addView(vehicleInfo, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        val split = LinearLayout(context)
-        layout.addView(split, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-        val alleyPane = FrameLayout(context)
-        val cabinPane = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            setBackgroundColor(Color.rgb(9, 15, 22))
+        layout.addView(createLocationBar(), LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        layout.addView(createDiagnosticsPanel())
+        layout.addView(createScenePanels(), LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        layout.addView(createControls(), LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            setMargins(dp(14), 0, dp(14), dp(12))
+        })
+    }
+
+    /** 위치 진단과 수신 시작/중지 버튼을 구성합니다. */
+    private fun createLocationBar(): LinearLayout {
+        locationBar.apply {
+            visibility=GONE
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(3), dp(12), dp(3))
+            setBackgroundColor(Color.rgb(16, 27, 37))
         }
-        split.addView(alleyPane, LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
-        split.addView(cabinPane, LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
-        alleyPane.addView(map, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        alleyPane.addView(guides, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        cabinPane.addView(label("ON-SENSE  ·  기능 2", 15, teal))
-        cabinPane.addView(label("실내 조명 연출", 20))
+        locationBar.addView(locationStatus, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        configure(locationControl, "위치 수신 시작") { locationAction?.invoke() }
+        locationBar.addView(locationControl, LinearLayout.LayoutParams(dp(150), dp(50)))
+        return locationBar
+    }
+
+    /** SDK·키 입력·조명 재조회 진단 패널을 구성합니다. */
+    private fun createDiagnosticsPanel(): LinearLayout {
+        diagnosticsPanel.addView(title); diagnosticsPanel.addView(vehicleText)
+        diagnosticsPanel.addView(inputText); diagnosticsPanel.addView(keyboardInputText)
+        diagnosticsPanel.addView(sdkDiagnostics); diagnosticsPanel.addView(detail)
+        diagnosticsPanel.addView(ambientDiagnostics)
+        return diagnosticsPanel
+    }
+
+    private fun createScenePanels(): LinearLayout {
+        val split=LinearLayout(context)
+        val alleyPane=FrameLayout(context)
+        val cabinPane=LinearLayout(context).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(12),dp(8),dp(12),dp(8))
+            setBackgroundColor(Color.rgb(9,15,22))
+        }
+        val leftPane=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
+        leftPane.addView(createSceneHeader())
+        leftPane.addView(alleyPane,LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT,0,1f))
+        split.addView(leftPane,LinearLayout.LayoutParams(0,LayoutParams.MATCH_PARENT,1f))
+        split.addView(cabinPane,LinearLayout.LayoutParams(0,LayoutParams.MATCH_PARENT,1f))
+        alleyPane.addView(map,LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.MATCH_PARENT))
+        alleyPane.addView(guides,LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.MATCH_PARENT))
+        populateCabin(cabinPane)
+        populateAlleyHud(alleyPane)
+        populateMacroBanner(alleyPane)
+        return split
+    }
+
+    /** 3D 안내와 진단 토글을 구성합니다. */
+    private fun createSceneHeader(): LinearLayout {
+        val modes = LinearLayout(context)
+        configure(diagnosticsButton,"진단 정보",::toggleDiagnostics)
+        modes.addView(label("3D 골목 · 좌우 간격은 가상 벽 기준", 14, muted),
+            LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 2f))
+        modes.addView(diagnosticsButton, buttonParams())
+        return modes
+    }
+
+    private fun toggleDiagnostics() {
+        diagnostics=!diagnostics
+        diagnosticsPanel.visibility=if(diagnostics) VISIBLE else GONE
+        locationBar.visibility=if(diagnostics) VISIBLE else GONE
+        diagnosticsButton.text=if(diagnostics) "진단 접기" else "진단 정보"
+    }
+
+    /** 실내 그림과 실제 조명 시연 스위치를 배치합니다. */
+    private fun populateCabin(cabinPane: LinearLayout) {
+        cabinPane.addView(label("ON-SENSE · 앰비언트 경고", 15, teal))
         cabinPane.addView(interior, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-        cabinPane.addView(label("좌우 간격은 가상 벽·주차 차량 기준입니다.", 12, muted))
+        cabinPane.addView(sceneCaption)
         cabinPane.addView(ambientStatus)
         ambientToggle.text = "차량 무드라이트 연동 · 정차 AVD"
         ambientToggle.textSize = 13f; ambientToggle.setTextColor(ink)
@@ -190,16 +292,26 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             }
         }
         cabinPane.addView(ambientToggle)
+    }
+
+    /** 3D 위에 가상 좌우 간격과 주의 문구를 배치합니다. */
+    private fun populateAlleyHud(alleyPane: FrameLayout) {
         title.setTypeface(title.typeface, Typeface.BOLD)
-        hud.addView(title); hud.addView(vehicleText); hud.addView(inputText); hud.addView(keyboardInputText)
+        hud.setPadding(dp(8),dp(2),dp(8),dp(2))
         val gaps = LinearLayout(context).apply {
             addView(leftGap, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             addView(rightGap, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         }
-        hud.addView(gaps); hud.addView(warning); hud.addView(detail)
+        hud.addView(gaps); hud.addView(warning)
+        warning.textSize=14f; warning.maxLines=1
+        leftGap.textSize=15f; rightGap.textSize=15f
         alleyPane.addView(hud, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
             setMargins(dp(14), dp(12), dp(14), 0)
         })
+    }
+
+    /** 매크로 단계·설명·가상 거리 배너를 배치합니다. */
+    private fun populateMacroBanner(alleyPane: FrameLayout) {
         macroBanner.addView(bannerProgress)
         val headline = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         headline.addView(bannerIcon, LinearLayout.LayoutParams(dp(90), LayoutParams.WRAP_CONTENT))
@@ -210,8 +322,20 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         alleyPane.addView(macroBanner, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
             setMargins(dp(14), dp(12), dp(14), 0)
         })
-        val controls = panel()
+    }
+
+    private fun createControls(): LinearLayout {
+        val controls=panel()
         controls.addView(macroStatus)
+        controls.addView(createGearControls())
+        controls.addView(createMacroConfirmation())
+        controls.addView(createActions())
+        controls.addView(label("키보드는 Pleos 에뮬레이터에 반영됩니다. 거리·미러·창문·비상등 매크로는 가상입니다.",12,muted))
+        return controls
+    }
+
+    /** 기존 Console 기어 요청 버튼을 구성합니다. */
+    private fun createGearControls(): LinearLayout {
         val gears = LinearLayout(context)
         for (value in ConsoleDriveModel.Gear.values()) {
             val button = Button(context)
@@ -225,7 +349,11 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             gearButtons[value] = button
             gears.addView(button, buttonParams())
         }
-        controls.addView(gears)
+        return gears
+    }
+
+    /** 실행 확인과 취소 버튼을 구성합니다. */
+    private fun createMacroConfirmation(): LinearLayout {
         confirmation.addView(label("가상 매크로를 실행할까요?\n미러 접기·창문 개방·비상등 3회는 시뮬레이션입니다. 실제 차량은 제어하지 않습니다.", 16))
         val decisions = LinearLayout(context)
         configure(confirm, "가상 실행") { executeMacro() }
@@ -235,41 +363,45 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
                 cancelMacro(); render(SystemClock.elapsedRealtime())
             }
         }, buttonParams())
-        confirmation.addView(decisions); controls.addView(confirmation)
-        val actions = LinearLayout(context)
-        configure(start, "SDK 연동 시작") {
-            if (keyboardMode || demoMode || world.contact || world.y >= 74) prepareScene(false)
-            else {
-                cancelMacro(); gate.reset()
-                running = !running; scenarioStarted = true; lastFrame = 0
-                if (!running) endAmbientDemo()
-            }
-            render(SystemClock.elapsedRealtime())
+        confirmation.addView(decisions)
+        return confirmation
+    }
+
+    private fun createActions(): LinearLayout {
+        configure(start,"SDK 연동 시작",::toggleSdkSimulation)
+        configure(demo,"자동 시연(가상)") { prepareScene(true); render(SystemClock.elapsedRealtime()) }
+        configure(keyboard,"Console 키보드 연결") { prepareKeyboard(); render(SystemClock.elapsedRealtime()) }
+        configure(reset,"초기화",::resetScene)
+        configure(macro,"패스 매크로(SIM)",::requestMacroConfirmation)
+        return LinearLayout(context).apply {
+            for(button in listOf(start,demo,keyboard,reset,macro)) addView(button,buttonParams())
         }
-        configure(demo, "자동 시연(가상)") { prepareScene(true); render(SystemClock.elapsedRealtime()) }
-        configure(keyboard, "Console 키보드 연결") { prepareKeyboard(); render(SystemClock.elapsedRealtime()) }
-        configure(reset, "초기화") {
-            endAmbientDemo(); sideWarning.reset()
-            cancelMacro(); gate.reset(); coach.reset(); world.reset(); consoleDriver.stop()
-            running = false; scenarioStarted = false; demoComplete = false; demoSeconds = 0.0; lastFrame = 0
-            render(SystemClock.elapsedRealtime())
+    }
+
+    private fun toggleSdkSimulation() {
+        if(keyboardMode || demoMode || world.contact || world.y>=74) prepareScene(false)
+        else {
+            cancelMacro(); gate.reset()
+            running=!running; scenarioStarted=true; lastFrame=0
+            if(!running) endAmbientDemo()
         }
-        configure(macro, "패스 매크로(SIM)") {
-            render(SystemClock.elapsedRealtime())
-            if (macroState.canConfirm) {
-                running = false; coach.silence()
-                if (keyboardMode) consoleDriver.release(AlleyKeyboardDriver.Control.ACCELERATE)
-                macroStage = 0
-                confirmation.visibility = View.VISIBLE
-                render(SystemClock.elapsedRealtime())
-            }
-        }
-        for (button in listOf(start, demo, keyboard, reset, macro)) actions.addView(button, buttonParams())
-        controls.addView(actions)
-        controls.addView(label("키보드는 Pleos 에뮬레이터에 반영됩니다. 거리·미러·창문·비상등 매크로는 가상입니다.", 12, muted))
-        layout.addView(controls, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-            setMargins(dp(14), 0, dp(14), dp(12))
-        })
+        render(SystemClock.elapsedRealtime())
+    }
+
+    private fun resetScene() {
+        endAmbientDemo(); sideWarning.reset()
+        cancelMacro(); gate.reset(); coach.reset(); world.reset(); consoleDriver.stop()
+        running=false; scenarioStarted=false; demoComplete=false; demoSeconds=0.0; lastFrame=0
+        render(SystemClock.elapsedRealtime())
+    }
+
+    private fun requestMacroConfirmation() {
+        render(SystemClock.elapsedRealtime())
+        if(!macroState.canConfirm) return
+        running=false; coach.silence()
+        if(keyboardMode) consoleDriver.release(AlleyKeyboardDriver.Control.ACCELERATE)
+        macroStage=0
+        confirmation.visibility=VISIBLE
         render(SystemClock.elapsedRealtime())
     }
 
@@ -368,6 +500,12 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     }
     fun release() { ambient.close(); consoleDriver.close() }
 
+    fun setLocationAction(action: () -> Unit) { locationAction = action }
+    fun showLocation(message: String, receiving: Boolean) {
+        locationStatus.show(message)
+        locationControl.text = if (receiving) "위치 수신 중지" else "위치 수신 시작"
+    }
+
     fun updateSpeed(value: Float?) { speed = value?.takeIf { it.isFinite() }; speedAt = SystemClock.elapsedRealtime() }
     fun updateBrake(value: Boolean?) { brake = value; brakeAt = SystemClock.elapsedRealtime() }
     fun updateSteering(raw: Float?, normalized: Float?) {
@@ -384,7 +522,10 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     fun setActive(value: Boolean) {
         if (active == value) return
         active = value; ambient.visible(value); main.removeCallbacks(frame); lastFrame = 0
-        if (value) { map.onResume(); coach.start(); main.post(frame) }
+        if (value) {
+            map.onResume()
+            coach.start(); main.post(frame)
+        }
         else {
             endAmbientDemo()
             running = false; scenarioStarted = false; gate.reset(); cancelMacro(); consoleDriver.stop()
@@ -414,38 +555,66 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         confirmation.visibility = View.GONE
         macroBusy = true; running = false
         val token = ++macroToken
-        fun later(delay: Long, action: () -> Unit) {
-            main.postDelayed({
-                if (token != macroToken || !macroBusy) return@postDelayed
-                if (!stoppedForMacro()) { cancelMacro("가상 매크로 취소 · 정차·브레이크 유지 필요"); render(SystemClock.elapsedRealtime()); return@postDelayed }
-                action(); render(SystemClock.elapsedRealtime())
-            }, delay)
-        }
-        later(0) { macroStage = 1; macroMessage = "SIM  1/3 · 사이드미러 접기 시뮬레이션" }
-        later(2200) { macroStage = 2; macroMessage = "SIM  2/3 · 조수석 창문 미세 개방 시뮬레이션" }
-        for (i in 0..5) later(4400L + i * 500) {
+        scheduleMacroStep(token,0) { macroStage = 1; macroMessage = "SIM  1/3 · 사이드미러 접기 시뮬레이션" }
+        scheduleMacroStep(token,2200) { macroStage = 2; macroMessage = "SIM  2/3 · 조수석 창문 미세 개방 시뮬레이션" }
+        for (i in 0..5) scheduleMacroStep(token,4400L + i * 500) {
             macroStage = 3; hazardOn = i % 2 == 0
             macroMessage = "SIM  3/3 · 비상등 가상 점멸 ${i / 2 + 1}/3"
         }
-        later(7600) {
+        scheduleMacroStep(token,7600) {
             macroBusy = false; macroStage = 4
             macroMessage = "가상 매크로 완료 · 미러·창문·비상등 실제 차량 제어 없음"
             android.util.Log.i("CarTalkMacro", "SIMULATION_COMPLETED; actuatorWrites=0")
         }
     }
 
+    /** Token and stopped-state checks apply to every scheduled macro step. */
+    private fun scheduleMacroStep(token: Int,delay: Long,action: () -> Unit) {
+        main.postDelayed({
+            if(token!=macroToken || !macroBusy) return@postDelayed
+            if(!stoppedForMacro()) {
+                cancelMacro("가상 매크로 취소 · 정차·브레이크 유지 필요")
+                render(SystemClock.elapsedRealtime())
+                return@postDelayed
+            }
+            action(); render(SystemClock.elapsedRealtime())
+        },delay)
+    }
+
+    private fun displayedClearance(): AlleyWorld.Clearance = world.clearance()
+
+    /** Coordinates rendering; each part owns only its labels, controls or presentation. */
     private fun render(now: Long) {
-        val input = motion(now)
-        val v = input.speed; val angle = input.steering
-        val gap = world.clearance(); lastGap = gap; map.publish(world, gap)
+        val input=motion(now)
+        val gap=displayedClearance(); lastGap=gap; map.publish(world,world.clearance())
+        renderVehicleInfo(now,input)
+        publishFeature2(now,gap)
+        updateMacroDetection(now,input,gap)
+        renderInputDiagnostics(input)
+        renderClearanceLabels(gap)
+        val guide=if(running && input.speed!=null && input.steering!=null) world.guidance(input.speed) else null
+        val message=guidanceMessage(input,gap,guide)
+        renderGuidance(now,gap,message)
+        renderMacroPresentation(gap)
+        renderControls(now,input)
+        announceGuidance(now,input,gap,guide,message)
+    }
+
+    /** 신선한 실제 SDK 값과 시연 값을 구분해 표시합니다. */
+    private fun renderVehicleInfo(now: Long,input: Motion) {
+        val v=input.speed
         vehicleInfo.render(
             speed?.takeIf { now - speedAt <= 3000 }?.let { abs(it) * 3.6f },
             rawSteering?.takeIf { now - steeringAt <= 3000 },
             freshGear(now)?.name,
             brake?.takeIf { now - brakeAt <= 3000 },
-            restricted, demoMode
+            restricted, demoMode, v?.let { (abs(it)*3.6).toFloat() }
         )
-        publishFeature2(now, gap)
+    }
+
+    /** 정차·브레이크·간격 조건을 갱신하고 무효 실행을 취소합니다. */
+    private fun updateMacroDetection(now: Long,input: Motion,gap: AlleyWorld.Clearance) {
+        val v=input.speed
         if (macroBusy && (world.contact || gap.meters <= .3 || !stoppedForMacro()))
             cancelMacro("가상 매크로 취소 · 근접 경고 또는 정차·브레이크 상태를 확인하세요")
         val detect = active && scenarioStarted && (running || demoComplete || macroState.armed || confirmation.visibility == View.VISIBLE)
@@ -454,6 +623,11 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         if (world.contact || gap.meters <= .3) macroState = macroState.copy(canConfirm = false)
         if (confirmation.visibility == View.VISIBLE && !macroState.armed)
             cancelMacro("감지 유효시간 만료 · 다시 시연하거나 조건을 확인하세요")
+    }
+
+    /** 입력 출처·조향·브레이크·키 상태를 진단에 표시합니다. */
+    private fun renderInputDiagnostics(input: Motion) {
+        val v=input.speed; val angle=input.steering
         vehicleText.show((v?.let { String.format(Locale.KOREA, "%.1f km/h", abs(it) * 3.6) } ?: "속도 수신 대기") +
             if (keyboardMode) "  ·  Console → SDK 수신" else if (demoMode) "  ·  가상 입력" else "  ·  차량 SDK 입력")
         keyboardInputText.visibility = if (keyboardMode) View.VISIBLE else View.GONE
@@ -462,12 +636,23 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             angle == null -> "미확인"; angle < -.02 -> "왼쪽"; angle > .02 -> "오른쪽"; else -> "중앙"
         } + "  ·  브레이크 " + when (input.brake) { true -> "눌림"; false -> "해제"; null -> "미확인" } +
             if (coach.ready) "  ·  음성 준비됨" else "  ·  음성 준비 안 됨")
-        leftGap.show(String.format(Locale.KOREA, "왼쪽 측면  %.2f m", gap.leftMeters))
-        rightGap.show(String.format(Locale.KOREA, "오른쪽 측면  %.2f m", gap.rightMeters))
+    }
+
+    /** 가상 좌우 간격과 등급 색을 표시합니다. */
+    private fun renderClearanceLabels(gap: AlleyWorld.Clearance) {
+        fun gapText(side: String, meters: Double) = side + " 가상 " +
+            if(meters.isFinite()) String.format(Locale.KOREA,"%.2fm",meters) else "--"
+        leftGap.show(gapText("왼쪽",gap.leftMeters)); rightGap.show(gapText("오른쪽",gap.rightMeters))
+        sdkDiagnostics.show("SDK 차속 "+(speed?.let { it*3.6f }?.toString() ?: "--")+"km/h · 조향각 "+(rawSteering?.toString() ?: "--")+"°")
+        sceneCaption.show("3D 가상 거리 · 실내 조명 연출")
         leftGap.setTextColor(SideClearanceWarning.level(gap.leftMeters).argb)
         rightGap.setTextColor(SideClearanceWarning.level(gap.rightMeters).argb)
-        val guide = if (running && v != null && angle != null) world.guidance(v) else null
-        val message = when {
+    }
+
+    /** 입력·근접·매크로 상태에 맞는 안내 문구를 선택합니다. */
+    private fun guidanceMessage(input: Motion,gap: AlleyWorld.Clearance,guide: AlleyWorld.Guide?): String {
+        val v=input.speed; val angle=input.steering
+        return when {
             world.contact -> "가상 접촉 · 시뮬레이션 정지"
             macroState.armed && !macroState.stopped -> "골목 패스 감지 · 정차 후 매크로 확인"
             macroState.canConfirm -> "정차 확인 · 패스 매크로를 선택하세요"
@@ -483,16 +668,25 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             gap.meters <= .8 -> "${gap.side} 공간 주의"
             else -> "주변을 확인하며 천천히 이동하세요"
         }
+    }
+
+    /** 근접 경고와 상세 입력 안내를 표시합니다. */
+    private fun renderGuidance(now: Long,gap: AlleyWorld.Clearance,message: String) {
+        warning.visibility=if(gap.meters<=.8 || world.contact) VISIBLE else GONE
         warning.show(message); warning.setTextColor(if (world.contact || gap.meters <= .3) Color.rgb(255, 127, 127) else ink)
         detail.show(if (keyboardMode) consoleMessage + " · 기어 수신 " + (freshGear(now)?.name ?: "미확인") + " · ↑/W 길게 가속 · ↓/S 브레이크 · ←A/→D 조향 · Space 정지"
             else if (demoMode) "앱 내부 가상 시연 · 차량 SDK 값이나 Console 상태를 바꾸지 않습니다."
             else "가상 최근접 ${String.format(Locale.KOREA, "%.2f", gap.meters)}m · ${gap.side}")
+    }
+
+    /** 매크로 단계 카드와 일반 HUD의 표시를 전환합니다. */
+    private fun renderMacroPresentation(gap: AlleyWorld.Clearance) {
         macroStatus.show(if (macroMessage.isNotEmpty()) macroMessage else when {
             macroState.canConfirm -> "매크로 준비됨 · 사용자 확인 후 가상 실행"
             macroState.armed -> "조건 감지됨 · 정차하고 브레이크를 유지하세요"
             else -> "패스 조건: 10km/h 이하 · 브레이크 ${macroState.presses}/3회(15초) · 가상 근접 1.2m 이하"
         })
-        val card = AlleyMacroPresentation.card(macroStage, gap.meters, gap.approaching, world.contact, hazardOn)
+        val card = if(macroStage<0) null else AlleyMacroPresentation.card(macroStage, gap.meters, gap.approaching, world.contact, hazardOn)
         macroBanner.visibility = if (card == null) View.GONE else View.VISIBLE
         hud.visibility = if (card == null) View.VISIBLE else View.GONE
         if (card != null) {
@@ -503,6 +697,11 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             bannerTitle.setTextColor(if (card.urgent) Color.rgb(255, 127, 127) else ink)
             bannerIcon.setTextColor(if (card.urgent) Color.rgb(255, 127, 127) else teal)
         }
+    }
+
+    /** 주행 제한·입력 신선도·매크로 상태에 따라 버튼을 갱신합니다. */
+    private fun renderControls(now: Long,input: Motion) {
+        val v=input.speed
         start.show(if (!keyboardMode && !demoMode && running) "SDK 일시정지" else "SDK 연동 시작")
         start.isEnabled = active && !restricted && !macroBusy
         demo.isEnabled = active && !restricted && debugEmulator && !macroBusy
@@ -514,8 +713,16 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
                 !macroBusy && freshGear(now) != value && v != null &&
                 (value == ConsoleDriveModel.Gear.N || abs(v) <= .01)
         }
+        demo.text="3D 자동 시연"
+        reset.text="3D 초기화"
+        macroStatus.visibility=if(diagnostics || macroState.armed || macroBusy) VISIBLE else GONE
         macro.isEnabled = active && !macroBusy && macroState.canConfirm
         confirm.isEnabled = active && !macroBusy && macroState.canConfirm
+    }
+
+    /** 기존 음성 안내 키와 재생 조건을 유지합니다. */
+    private fun announceGuidance(now: Long,input: Motion,gap: AlleyWorld.Clearance,guide: AlleyWorld.Guide?,message: String) {
+        val v=input.speed; val angle=input.steering
         if (active && running && v != null && angle != null) {
             val key = when {
                 gap.meters <= .3 -> "near:" + gap.side
@@ -527,6 +734,20 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             }
             coach.announce(key, message, now)
         } else coach.silence()
+    }
+
+    /** Actual API readback remains the source of vehicle-light application status. */
+    private fun showAmbientStatus(message: String) {
+        ambientDiagnostics.show(message)
+        ambientStatus.show(when {
+            message.contains("복원 재조회 일치") -> "차량 조명 · 원래 색 복원 확인"
+            message.contains("색 변경 재조회 일치") -> "차량 조명 · 변경 재조회 일치"
+            message.contains("현재값 일치") -> "차량 조명 · 현재 색 일치"
+            message.contains("적용 미확인") -> "차량 조명 · 적용 미확인"
+            message.contains("복원 대기") -> "차량 조명 · 정차 후 복원 대기"
+            message.contains("꺼짐") -> "차량 조명 · 연동 꺼짐"
+            else -> "차량 조명 · 상태 확인 중 (진단 정보)"
+        })
     }
 
     private fun endAmbientDemo() {

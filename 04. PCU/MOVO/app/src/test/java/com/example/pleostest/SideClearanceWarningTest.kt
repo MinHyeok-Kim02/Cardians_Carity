@@ -5,6 +5,43 @@ import org.junit.Test
 import com.example.pleostest.SideClearanceWarning.Level.*
 
 class SideClearanceWarningTest {
+    @Test fun retreatRetractsEverySectionAndReapproachExpandsAgainIndependently() {
+        val model=SideClearanceWarning()
+        var previous=1f
+        for((index,distance) in listOf(.3,.5,.8,1.2,1.6,2.0).withIndex()) {
+            val frame=model.update(distance,.2,index.toLong())
+            assertTrue(frame.left.ambientStrength<=previous)
+            assertEquals(1f,frame.right.ambientStrength,0f)
+            previous=frame.left.ambientStrength
+        }
+        assertEquals(0f,previous,0f)
+        val close=model.update(.2,2.0,100)
+        assertEquals(1f,close.left.ambientStrength,0f)
+        assertEquals(0f,close.right.ambientStrength,0f)
+        assertEquals(0f,model.update(Double.NaN,2.0,101).left.ambientStrength,0f)
+    }
+    @Test fun ambientColorChangesWithinTheSameWarningLevel() {
+        val a=SideClearanceWarning().update(.7,1.4,0)
+        val b=SideClearanceWarning().update(.5,1.2,1)
+        assertEquals(a.left.level,b.left.level)
+        assertNotEquals(a.left.ambientArgb,b.left.ambientArgb)
+        assertEquals(a.right.level,b.right.level)
+        assertNotEquals(a.right.ambientArgb,b.right.ambientArgb)
+        assertEquals(SideClearanceWarning.ambientColor(.7),a.left.ambientArgb)
+        assertEquals(SideClearanceWarning.ambientColor(1.4),a.right.ambientArgb)
+    }
+    @Test fun continuousColorHasNoJumpAtStopsAndClampsInvalidInputs() {
+        for(distance in listOf(.3,.8,1.04,1.6)) {
+            val a=SideClearanceWarning.ambientColor(distance-.000001)
+            val b=SideClearanceWarning.ambientColor(distance+.000001)
+            for(shift in listOf(0,8,16))
+                assertTrue(kotlin.math.abs(((a ushr shift) and 255)-((b ushr shift) and 255))<=1)
+        }
+        assertEquals(GREEN.argb,SideClearanceWarning.ambientColor(3.0))
+        assertEquals(RED.argb,SideClearanceWarning.ambientColor(0.0))
+        assertEquals(UNKNOWN.argb,SideClearanceWarning.ambientColor(Double.NaN))
+        assertEquals(UNKNOWN.argb,SideClearanceWarning.ambientColor(-1.0))
+    }
     @Test fun thresholdsAndInvalidSignals() {
         assertEquals(GREEN, SideClearanceWarning.level(.80001))
         assertEquals(ORANGE, SideClearanceWarning.level(.8))

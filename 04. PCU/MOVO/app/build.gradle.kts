@@ -3,6 +3,7 @@ plugins {
 }
 
 android {
+    buildFeatures { buildConfig = true }
     namespace = "com.example.pleostest"
     useLibrary("android.car")
     compileSdk {

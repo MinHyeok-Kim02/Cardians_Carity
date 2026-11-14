@@ -7,7 +7,7 @@ class AlleyWorld(
     val parkedCars: List<ParkedCar> = DEFAULT_PARKED
 ) {
     data class Point(val x: Double, val y: Double)
-    data class ParkedCar(val x: Double, val y: Double, val width: Double = 1.8, val length: Double = 4.4)
+    data class ParkedCar(val x: Double, val y: Double, val width: Double = 1.8, val length: Double = 4.4, val label: String = "주차 차량")
     data class Clearance(
         val meters: Double, val side: String, val approaching: Boolean, val contact: Boolean,
         val leftMeters: Double, val rightMeters: Double, val frontMeters: Double, val rearMeters: Double
@@ -115,7 +115,7 @@ class AlleyWorld(
                 val direction = if (abs(lateral) < .5) {
                     if (forward >= 0) "전방" else "후방"
                 } else if (lateral < 0) "왼쪽" else "오른쪽"
-                label = direction + " 주차 차량"
+                label = direction + " " + car.label
             }
         }
         return Clearance(distance, label, false, contact || distance <= 0,
