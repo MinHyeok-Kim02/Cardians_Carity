@@ -73,6 +73,8 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private val start = Button(context)
     private val demo = Button(context)
     private val keyboard = Button(context)
+    private val virtualKeyboard = Button(context)
+    private val virtualDrive = VirtualKeyboardDrive()
     private val reset = Button(context)
     private val macro = Button(context)
     private val confirm = Button(context)
@@ -86,6 +88,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private var scenarioStarted = false
     private var demoMode = false
     private var keyboardMode = false
+    private var virtualKeyboardMode = false
     private var windowFocused = true
     private var demoSeconds = 0.0
     private var demoComplete = false
@@ -109,6 +112,10 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
 
     private data class Motion(val speed: Double?, val steering: Double?, val brake: Boolean?)
     private fun motion(now: Long): Motion {
+        if(virtualKeyboardMode) {
+            val input=virtualDrive.input()
+            return Motion(input.speedMps,input.steering,input.brake)
+        }
         if (keyboardMode) {
             if (!consoleDriver.connected || freshGear(now) == null) return Motion(null, null, null)
             val fresh = speed?.takeIf { now - speedAt <= 3000 }
@@ -121,7 +128,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             return Motion(input.speedMps, input.steering, input.brake)
         }
         val receivedSpeed = speed?.takeIf { now - speedAt <= 3000 }?.toDouble()
-        val signedSpeed = if (freshGear(now) == ConsoleDriveModel.Gear.R) receivedSpeed?.let { -abs(it) } else receivedSpeed
+        val signedSpeed = VehicleMotionInput.signedSpeed(receivedSpeed,freshGear(now))
         return Motion(signedSpeed,
             steering?.takeIf { now - steeringAt <= 3000 }?.toDouble(),
             brake?.takeIf { now - brakeAt <= 3000 })
@@ -140,9 +147,10 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         val dt=frameDelta(now)
         if(restricted && !emulator) running=false
         if(running && demoMode) demoSeconds+=dt
+        if(running && virtualKeyboardMode) virtualDrive.advance(dt)
         val input=motion(now)
         advanceWorld(dt,input)
-        finishSceneIfNeeded()
+        finishSceneIfNeeded(input)
         lastGap=displayedClearance()
         map.publish(world,lastGap)
         publishFeature2(now,lastGap)
@@ -161,19 +169,20 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             (world.simulationSeconds>0 || abs(input.speed)>.01)) world.advance(dt,input.speed,input.steering)
     }
 
-    private fun finishSceneIfNeeded() {
+    private fun finishSceneIfNeeded(input: Motion) {
         if(running && demoMode && demoSeconds>=AlleyDemoScenario.DURATION_SECONDS) {
             demoComplete=true; running=false; endAmbientDemo()
         }
-        if(running && (world.contact || world.y>=74)) {
+        if(running && (world.contact || world.shouldStopAtEnd(input.speed))) {
             running=false; endAmbientDemo()
+            if(virtualKeyboardMode) virtualDrive.stop()
             if(keyboardMode && consoleDriver.connected) consoleDriver.stop()
         }
     }
 
     private fun logMotion(now: Long,input: Motion) {
         if(!running || now-lastLog<1000) return
-        android.util.Log.d("CarTalkAlley","x=${world.x} y=${world.y} heading=${world.heading} speed=${input.speed} steering=${input.steering} source=${if(keyboardMode) "CONSOLE_SDK" else if(demoMode) "SYNTHETIC" else "SDK"}")
+        android.util.Log.d("CarTalkAlley","x=${world.x} y=${world.y} heading=${world.heading} speed=${input.speed} steering=${input.steering} source=${if(keyboardMode) "CONSOLE_SDK" else if(virtualKeyboardMode) "VIRTUAL_KEYBOARD" else if(demoMode) "SYNTHETIC" else "SDK"}")
         lastLog=now
     }
 
@@ -330,7 +339,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         controls.addView(createGearControls())
         controls.addView(createMacroConfirmation())
         controls.addView(createActions())
-        controls.addView(label("키보드는 Pleos 에뮬레이터에 반영됩니다. 거리·미러·창문·비상등 매크로는 가상입니다.",12,muted))
+        controls.addView(label("R 선택 후 ↑/W: 후진 · ↓/S: 브레이크 · Space: 정지 · 거리·매크로는 가상입니다.",12,muted))
         return controls
     }
 
@@ -339,17 +348,37 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         val gears = LinearLayout(context)
         for (value in ConsoleDriveModel.Gear.values()) {
             val button = Button(context)
-            configure(button, value.name) {
-                val current = motion(SystemClock.elapsedRealtime()).speed
-                consoleDriver.select(value, current)
-                consoleMessage = value.name + " 요청 · 수신 확인 중"
-                if (keyboardMode) requestFocus()
-                render(SystemClock.elapsedRealtime())
-            }
+            configure(button,value.name) { requestGear(value) }
             gearButtons[value] = button
             gears.addView(button, buttonParams())
         }
         return gears
+    }
+
+    /** Shared by gear buttons and the R shortcut; changes direction only with fresh stopped input. */
+    private fun requestGear(value: ConsoleDriveModel.Gear) {
+        if(!active || macroBusy) return
+        if(virtualKeyboardMode) {
+            if(virtualDrive.select(value)) {
+                if(!world.contact) { running=true; scenarioStarted=true; lastFrame=0 }
+                consoleMessage="가상 "+value.name+" 선택 · 실제 기어 "+(freshGear(SystemClock.elapsedRealtime())?.name ?: "--")
+                android.util.Log.i("CarTalkKeyboard","VIRTUAL_GEAR_SELECTED gear="+value.name)
+            } else consoleMessage="가상 차량 정지 후 기어를 선택하세요"
+            requestFocus(); render(SystemClock.elapsedRealtime())
+            return
+        }
+        if(!keyboardMode || !consoleDriver.connected) return
+        val now=SystemClock.elapsedRealtime()
+        val current=motion(now).speed
+        if(current==null || (value!=ConsoleDriveModel.Gear.N && abs(current)>.01)) {
+            consoleMessage="정지 후 기어를 선택하세요 · 최신 속도 수신 필요"
+        } else {
+            consoleDriver.select(value,current)
+            consoleMessage=value.name+" 요청 · 수신 확인 중"
+            if(!world.contact) { running=true; scenarioStarted=true; lastFrame=0 }
+        }
+        requestFocus()
+        render(now)
     }
 
     /** 실행 확인과 취소 버튼을 구성합니다. */
@@ -371,15 +400,16 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         configure(start,"SDK 연동 시작",::toggleSdkSimulation)
         configure(demo,"자동 시연(가상)") { prepareScene(true); render(SystemClock.elapsedRealtime()) }
         configure(keyboard,"Console 키보드 연결") { prepareKeyboard(); render(SystemClock.elapsedRealtime()) }
+        configure(virtualKeyboard,"가상 키보드 시연",::prepareVirtualKeyboard)
         configure(reset,"초기화",::resetScene)
         configure(macro,"패스 매크로(SIM)",::requestMacroConfirmation)
         return LinearLayout(context).apply {
-            for(button in listOf(start,demo,keyboard,reset,macro)) addView(button,buttonParams())
+            for(button in listOf(start,demo,keyboard,virtualKeyboard,reset,macro)) addView(button,buttonParams())
         }
     }
 
     private fun toggleSdkSimulation() {
-        if(keyboardMode || demoMode || world.contact || world.y>=74) prepareScene(false)
+        if(keyboardMode || virtualKeyboardMode || demoMode || world.contact || world.y>=AlleyWorld.END_STOP_Y) prepareScene(false)
         else {
             cancelMacro(); gate.reset()
             running=!running; scenarioStarted=true; lastFrame=0
@@ -390,7 +420,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
 
     private fun resetScene() {
         endAmbientDemo(); sideWarning.reset()
-        cancelMacro(); gate.reset(); coach.reset(); world.reset(); consoleDriver.stop()
+        cancelMacro(); gate.reset(); coach.reset(); world.reset(); consoleDriver.stop(); virtualDrive.reset()
         running=false; scenarioStarted=false; demoComplete=false; demoSeconds=0.0; lastFrame=0
         render(SystemClock.elapsedRealtime())
     }
@@ -400,6 +430,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         if(!macroState.canConfirm) return
         running=false; coach.silence()
         if(keyboardMode) consoleDriver.release(AlleyKeyboardDriver.Control.ACCELERATE)
+        if(virtualKeyboardMode) virtualDrive.stop()
         macroStage=0
         confirmation.visibility=VISIBLE
         render(SystemClock.elapsedRealtime())
@@ -408,7 +439,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private fun prepareScene(synthetic: Boolean) {
         endAmbientDemo(); sideWarning.reset()
         cancelMacro(); gate.reset(); coach.reset(); world.reset(); consoleDriver.stop()
-        keyboardMode = false
+        keyboardMode = false; virtualKeyboardMode=false; virtualDrive.reset()
         demoMode = synthetic; demoSeconds = 0.0; demoComplete = false
         if (synthetic) world.restore(0.0, 11.0, 0.0, false)
         scenarioStarted = true; running = true; lastFrame = 0
@@ -421,18 +452,30 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         requestFocus()
     }
 
+    /** Explicit local mode for reverse demos while the actual car stays parked. */
+    private fun prepareVirtualKeyboard() {
+        if(!active || restricted || !debugEmulator || !parkConfirmed()) return
+        prepareScene(false)
+        virtualKeyboardMode=true
+        virtualDrive.reset()
+        consoleMessage="가상 키보드 · 실제 SDK/Console 값 변경 없음"
+        lastKeyboardInput="가상 D/R 선택 후 ↑/W 가속 · R 키: 가상 후진 기어"
+        requestFocus()
+        render(SystemClock.elapsedRealtime())
+    }
+
     fun drivingWindowFocusChanged(focused: Boolean) {
         windowFocused = focused
-        if (!focused && keyboardMode) {
+        if (!focused && (keyboardMode || virtualKeyboardMode)) {
             endAmbientDemo()
-            consoleDriver.stop(); running = false; scenarioStarted = false
+            consoleDriver.stop(); virtualDrive.stop(); running = false; scenarioStarted = false
             gate.reset(); cancelMacro("키보드 운전 일시정지 · 버튼으로 다시 시작하세요")
             render(SystemClock.elapsedRealtime())
         }
     }
 
     fun handleDrivingKey(event: KeyEvent): Boolean {
-        if (!active || !keyboardMode || !debugEmulator) return false
+        if (!active || (!keyboardMode && !virtualKeyboardMode) || !debugEmulator) return false
         val control = when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_W -> AlleyKeyboardDriver.Control.ACCELERATE
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_S -> AlleyKeyboardDriver.Control.BRAKE
@@ -443,22 +486,24 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         }
         if (control == null && event.keyCode != KeyEvent.KEYCODE_R) return false
         if (event.repeatCount == 0 || event.action == KeyEvent.ACTION_UP) {
-            val accepted = active && windowFocused && consoleDriver.connected
+            val accepted = active && windowFocused && (virtualKeyboardMode || consoleDriver.connected)
             val action = if(event.action == KeyEvent.ACTION_UP) "KEY_UP" else "KEY_DOWN"
-            lastKeyboardInput = "${KeyEvent.keyCodeToString(event.keyCode)} " +
+            lastKeyboardInput = (if(virtualKeyboardMode) "가상 " else "")+"${KeyEvent.keyCodeToString(event.keyCode)} " +
                 (if(event.action == KeyEvent.ACTION_UP) "뗌" else "눌림") +
                 if(accepted) " · 키 수신됨" else " · 연결/포커스 확인 필요"
             android.util.Log.i("CarTalkKeyboard",
                 "$action code=${event.keyCode} control=$control accepted=$accepted running=$running")
         }
         if (event.action == KeyEvent.ACTION_UP) {
-            if (control != null) consoleDriver.release(control)
-            if (event.isCanceled) consoleDriver.stop()
-        } else if (event.action == KeyEvent.ACTION_DOWN && windowFocused && consoleDriver.connected) {
-            if (event.keyCode == KeyEvent.KEYCODE_R && event.repeatCount == 0 && parkConfirmed()) prepareKeyboard()
+            if(control!=null) {
+                if(virtualKeyboardMode) virtualDrive.release(control) else consoleDriver.release(control)
+            }
+            if(event.isCanceled) { virtualDrive.stop(); consoleDriver.stop() }
+        } else if (event.action == KeyEvent.ACTION_DOWN && windowFocused && (virtualKeyboardMode || consoleDriver.connected)) {
+            if (event.keyCode == KeyEvent.KEYCODE_R && event.repeatCount == 0) requestGear(ConsoleDriveModel.Gear.R)
             else if (control != null && (running ||
                 control == AlleyKeyboardDriver.Control.BRAKE || control == AlleyKeyboardDriver.Control.STOP))
-                consoleDriver.press(control)
+                if(virtualKeyboardMode) virtualDrive.press(control) else consoleDriver.press(control)
         }
         render(SystemClock.elapsedRealtime())
         return true
@@ -516,6 +561,9 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     fun updateRestrictions(value: Boolean) {
         restricted = value
         if (value) { confirmation.visibility = View.GONE; if (macroBusy) cancelMacro("매크로 취소 · 주행 제한") }
+        if(value && virtualKeyboardMode) {
+            virtualDrive.stop(); running=false; scenarioStarted=false
+        }
         if (value && !emulator) running = false
         render(SystemClock.elapsedRealtime())
     }
@@ -528,7 +576,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         }
         else {
             endAmbientDemo()
-            running = false; scenarioStarted = false; gate.reset(); cancelMacro(); consoleDriver.stop()
+            running = false; scenarioStarted = false; gate.reset(); cancelMacro(); consoleDriver.stop(); virtualDrive.stop()
             map.onPause(); coach.stop(); speed = null; steering = null; rawSteering = null; brake = null
         }
     }
@@ -606,9 +654,9 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         vehicleInfo.render(
             speed?.takeIf { now - speedAt <= 3000 }?.let { abs(it) * 3.6f },
             rawSteering?.takeIf { now - steeringAt <= 3000 },
-            freshGear(now)?.name,
+            if(virtualKeyboardMode) "가상 "+virtualDrive.gear.name else freshGear(now)?.name,
             brake?.takeIf { now - brakeAt <= 3000 },
-            restricted, demoMode, v?.let { (abs(it)*3.6).toFloat() }
+            restricted, demoMode || virtualKeyboardMode, v?.let { (abs(it)*3.6).toFloat() }
         )
     }
 
@@ -629,8 +677,8 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private fun renderInputDiagnostics(input: Motion) {
         val v=input.speed; val angle=input.steering
         vehicleText.show((v?.let { String.format(Locale.KOREA, "%.1f km/h", abs(it) * 3.6) } ?: "속도 수신 대기") +
-            if (keyboardMode) "  ·  Console → SDK 수신" else if (demoMode) "  ·  가상 입력" else "  ·  차량 SDK 입력")
-        keyboardInputText.visibility = if (keyboardMode) View.VISIBLE else View.GONE
+            if (virtualKeyboardMode) "  ·  가상 키보드 (실제 차량 변경 없음)" else if (keyboardMode) "  ·  Console → SDK 수신" else if (demoMode) "  ·  가상 입력" else "  ·  차량 SDK 입력")
+        keyboardInputText.visibility = if (keyboardMode || virtualKeyboardMode) View.VISIBLE else View.GONE
         keyboardInputText.show(lastKeyboardInput)
         inputText.show("조향 " + when {
             angle == null -> "미확인"; angle < -.02 -> "왼쪽"; angle > .02 -> "오른쪽"; else -> "중앙"
@@ -674,7 +722,8 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private fun renderGuidance(now: Long,gap: AlleyWorld.Clearance,message: String) {
         warning.visibility=if(gap.meters<=.8 || world.contact) VISIBLE else GONE
         warning.show(message); warning.setTextColor(if (world.contact || gap.meters <= .3) Color.rgb(255, 127, 127) else ink)
-        detail.show(if (keyboardMode) consoleMessage + " · 기어 수신 " + (freshGear(now)?.name ?: "미확인") + " · ↑/W 길게 가속 · ↓/S 브레이크 · ←A/→D 조향 · Space 정지"
+        detail.show(if(virtualKeyboardMode) consoleMessage+" · ↑/W 전진·후진 · ↓/S 브레이크 · Space 정지"
+            else if (keyboardMode) consoleMessage + " · 기어 수신 " + (freshGear(now)?.name ?: "미확인") + " · ↑/W 길게 가속 · ↓/S 브레이크 · ←A/→D 조향 · Space 정지"
             else if (demoMode) "앱 내부 가상 시연 · 차량 SDK 값이나 Console 상태를 바꾸지 않습니다."
             else "가상 최근접 ${String.format(Locale.KOREA, "%.2f", gap.meters)}m · ${gap.side}")
     }
@@ -702,16 +751,18 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     /** 주행 제한·입력 신선도·매크로 상태에 따라 버튼을 갱신합니다. */
     private fun renderControls(now: Long,input: Motion) {
         val v=input.speed
-        start.show(if (!keyboardMode && !demoMode && running) "SDK 일시정지" else "SDK 연동 시작")
+        start.show(if (!keyboardMode && !virtualKeyboardMode && !demoMode && running) "SDK 일시정지" else "SDK 연동 시작")
         start.isEnabled = active && !restricted && !macroBusy
         demo.isEnabled = active && !restricted && debugEmulator && !macroBusy
         keyboard.isEnabled = active && !restricted && debugEmulator && !macroBusy
+        virtualKeyboard.isEnabled=active && !restricted && debugEmulator && !macroBusy && parkConfirmed()
         reset.isEnabled = active && !restricted
         for ((value,button) in gearButtons) {
-            button.text = value.name + if(freshGear(now) == value) " ✓" else ""
-            button.isEnabled = active && debugEmulator && keyboardMode && consoleDriver.connected &&
-                !macroBusy && freshGear(now) != value && v != null &&
-                (value == ConsoleDriveModel.Gear.N || abs(v) <= .01)
+            val selected=if(virtualKeyboardMode) virtualDrive.gear else freshGear(now)
+            button.text=(if(virtualKeyboardMode) "가상 " else "")+value.name+if(selected==value) " ✓" else ""
+            button.isEnabled=active && debugEmulator && !macroBusy && selected!=value && v!=null &&
+                ((virtualKeyboardMode && !restricted) || (keyboardMode && consoleDriver.connected)) &&
+                (value==ConsoleDriveModel.Gear.N || abs(v)<=.01)
         }
         demo.text="3D 자동 시연"
         reset.text="3D 초기화"

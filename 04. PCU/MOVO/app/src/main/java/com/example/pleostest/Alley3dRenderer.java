@@ -16,13 +16,15 @@ final class Alley3dRenderer implements GLSurfaceView.Renderer {
 
     private final float[] projection=new float[16], view=new float[16], vp=new float[16];
     private final float[] model=new float[16], mvp=new float[16], car=new float[16], identity=new float[16];
-    private FloatBuffer mesh;
+    private FloatBuffer mesh, bollardMesh;
+    private static final int BOLLARD_SIDES=16;
+    private static final int BOLLARD_VERTICES=BOLLARD_SIDES*12;
     private int program, position, normal, uMvp, uModel, uColor, uUnlit;
 
     @Override public void onSurfaceCreated(GL10 gl,EGLConfig config) {
         createShaderProgram();
         locateShaderInputs();
-        mesh=cube();
+        mesh=cube(); bollardMesh=cylinderMesh();
         Matrix.setIdentityM(identity,0);
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);
         GLES20.glClearColor(.68f,.82f,.91f,1);
@@ -65,6 +67,8 @@ final class Alley3dRenderer implements GLSurfaceView.Renderer {
         drawWalls(f);
         drawRoadJoints(f);
         drawNeighborhood(f);
+        drawCenterlineBollards(f);
+        bindMesh();
         updateCarTransform(f);
         drawCarBody(f);
         drawLamps(f);
@@ -96,24 +100,29 @@ final class Alley3dRenderer implements GLSurfaceView.Renderer {
     private void drawGround(Alley3dFrame f) {
         float middle=(f.leftWall+f.rightWall)/2;
         box(identity,middle,-.18f,f.z-12,90,.30f,120,.49f,.62f,.45f,false);
-        box(identity,middle,-.025f,f.z-12,f.rightWall-f.leftWall,.05f,100,.23f,.27f,.30f,false);
+        float end=-(float)AlleyWorld.END_LINE_Y-1f;
+        float rear=f.z+40f, center=(rear+end)/2f, length=Math.max(1f,rear-end);
+        box(identity,middle,-.025f,center,f.rightWall-f.leftWall,.05f,length,.23f,.27f,.30f,false);
         for(int side=0;side<2;side++) {
             float edge=side==0?f.leftWall:f.rightWall, sign=side==0?-1:1;
-            box(identity,edge+sign*1.05f,.05f,f.z-12,2.1f,.10f,100,.70f,.72f,.68f,false);
-            box(identity,edge-sign*.14f,.007f,f.z-12,.055f,.012f,100,.94f,.84f,.48f,true);
+            box(identity,edge+sign*1.05f,.05f,center,2.1f,.10f,length,.70f,.72f,.68f,false);
+            box(identity,edge-sign*.14f,.007f,center,.055f,.012f,length,.94f,.84f,.48f,true);
         }
     }
     private void drawWalls(Alley3dFrame f) {
         // Inner faces coincide exactly with the simulation wall coordinates.
+        float end=-(float)AlleyWorld.END_LINE_Y, rear=f.z+40f;
+        float center=(rear+end)/2f, length=Math.max(1f,rear-end);
         for(int side=0;side<2;side++) {
             float edge=side==0?f.leftWall-.13f:f.rightWall+.13f;
-            box(identity,edge,.30f,f.z-12,.26f,.60f,100,.69f,.68f,.61f,false);
-            box(identity,edge,.62f,f.z-12,.30f,.06f,100,.88f,.86f,.78f,false);
+            box(identity,edge,.30f,center,.26f,.60f,length,.69f,.68f,.61f,false);
+            box(identity,edge,.62f,center,.30f,.06f,length,.88f,.86f,.78f,false);
         }
     }
     private void drawRoadJoints(Alley3dFrame f) {
         int start=(int)Math.floor(f.z/4)*4-48;
         for(int z=start;z<start+72;z+=4) {
+            if(z<-(float)AlleyWorld.END_LINE_Y) continue;
             box(identity,f.leftWall+.38f,.006f,z,.18f,.008f,.75f,.27f,.31f,.33f,false);
             for(int side=0;side<2;side++) {
                 float sign=side==0?-1:1, edge=side==0?f.leftWall:f.rightWall;
@@ -126,6 +135,7 @@ final class Alley3dRenderer implements GLSurfaceView.Renderer {
         // World-aligned blocks do not slide along with the chase camera.
         int start=(int)Math.floor(f.z/10)*10-50;
         for(int z=start;z<start+70;z+=10) {
+            if(z<-(float)AlleyWorld.END_LINE_Y) continue;
             int block=Math.floorMod(z/10,5);
             for(int side=0;side<2;side++) {
                 float sign=side==0?-1:1, edge=side==0?f.leftWall:f.rightWall;
@@ -156,6 +166,72 @@ final class Alley3dRenderer implements GLSurfaceView.Renderer {
             }
         }
     }
+    /** Render the same longitudinal centerline footprints that AlleyWorld measures. */
+    private void drawCenterlineBollards(Alley3dFrame f) {
+        if(f.bollards.length==0) return;
+        float first=-f.bollards[0][1], last=-f.bollards[f.bollards.length-1][1];
+        float center=(first+last)/2f, length=Math.abs(first-last)+2f;
+        // Narrow yellow centerline island, parallel to travel, never a cross-road barrier.
+        for(float x:new float[]{-.32f,.32f})
+            box(identity,x,.008f,center,.045f,.016f,length,1f,.78f,.18f,true);
+        bindBollardMesh();
+        for(float[] post:f.bollards) drawSafetyBollard(post);
+    }
+
+    private void bindBollardMesh() {
+        bollardMesh.position(0);
+        GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,24,bollardMesh);
+        bollardMesh.position(3);
+        GLES20.glVertexAttribPointer(normal,3,GLES20.GL_FLOAT,false,24,bollardMesh);
+    }
+
+    private void drawSafetyBollard(float[] post) {
+        float x=post[0], z=-post[1], base=post[2], height=post[3];
+        cylinder(x,.035f,z,base,.07f,.38f,.17f,.08f,false);
+        cylinder(x,height*.52f,z,.15f,height*.91f,1f,.23f,.045f,false);
+        cylinder(x,height*.60f,z,.155f,height*.105f,.96f,.96f,.90f,true);
+        cylinder(x,height*.83f,z,.155f,height*.105f,.96f,.96f,.90f,true);
+        cylinder(x,height,z,.16f,.035f,1f,.30f,.07f,false);
+    }
+
+    private void cylinder(float x,float y,float z,float diameter,float height,
+                          float r,float g,float b,boolean unlit) {
+        Matrix.setIdentityM(model,0);
+        Matrix.translateM(model,0,x,y,z);
+        Matrix.scaleM(model,0,diameter,height,diameter);
+        Matrix.multiplyMM(mvp,0,vp,0,model,0);
+        GLES20.glUniformMatrix4fv(uMvp,1,false,mvp,0);
+        GLES20.glUniformMatrix4fv(uModel,1,false,model,0);
+        GLES20.glUniform3f(uColor,r,g,b);
+        GLES20.glUniform1f(uUnlit,unlit?1:0);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,BOLLARD_VERTICES);
+    }
+
+    private void putCylinderVertex(FloatBuffer buffer,float x,float y,float z,float nx,float ny,float nz) {
+        buffer.put(x).put(y).put(z).put(nx).put(ny).put(nz);
+    }
+
+    private FloatBuffer cylinderMesh() {
+        FloatBuffer buffer=ByteBuffer.allocateDirect(BOLLARD_VERTICES*6*4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        for(int i=0;i<BOLLARD_SIDES;i++) {
+            double a=i*2*Math.PI/BOLLARD_SIDES, b=(i+1)*2*Math.PI/BOLLARD_SIDES;
+            float ax=(float)Math.cos(a),az=(float)Math.sin(a),bx=(float)Math.cos(b),bz=(float)Math.sin(b);
+            putCylinderVertex(buffer,ax*.5f,-.5f,az*.5f,ax,0,az);
+            putCylinderVertex(buffer,bx*.5f,-.5f,bz*.5f,bx,0,bz);
+            putCylinderVertex(buffer,bx*.5f,.5f,bz*.5f,bx,0,bz);
+            putCylinderVertex(buffer,ax*.5f,-.5f,az*.5f,ax,0,az);
+            putCylinderVertex(buffer,bx*.5f,.5f,bz*.5f,bx,0,bz);
+            putCylinderVertex(buffer,ax*.5f,.5f,az*.5f,ax,0,az);
+            putCylinderVertex(buffer,0,.5f,0,0,1,0);
+            putCylinderVertex(buffer,ax*.5f,.5f,az*.5f,0,1,0);
+            putCylinderVertex(buffer,bx*.5f,.5f,bz*.5f,0,1,0);
+            putCylinderVertex(buffer,0,-.5f,0,0,-1,0);
+            putCylinderVertex(buffer,bx*.5f,-.5f,bz*.5f,0,-1,0);
+            putCylinderVertex(buffer,ax*.5f,-.5f,az*.5f,0,-1,0);
+        }
+        buffer.position(0); return buffer;
+    }
+
     private void updateCarTransform(Alley3dFrame f) {
         Matrix.setIdentityM(car,0); Matrix.translateM(car,0,f.x,0,f.z);
         Matrix.rotateM(car,0,-f.heading,0,1,0);

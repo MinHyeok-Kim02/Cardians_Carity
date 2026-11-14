@@ -4,10 +4,12 @@ import kotlin.math.*
 
 /** All geometry is synthetic. Only ego speed and steering come from the emulator. */
 class AlleyWorld(
-    val parkedCars: List<ParkedCar> = DEFAULT_PARKED
+    val parkedCars: List<ParkedCar> = DEFAULT_PARKED,
+    val safetyBollards: List<SafetyBollard> = CENTER_BOLLARDS
 ) {
     data class Point(val x: Double, val y: Double)
     data class ParkedCar(val x: Double, val y: Double, val width: Double = 1.8, val length: Double = 4.4, val label: String = "주차 차량")
+    data class SafetyBollard(val x: Double,val y: Double,val baseWidth: Double=.45,val height: Double=.95)
     data class Clearance(
         val meters: Double, val side: String, val approaching: Boolean, val contact: Boolean,
         val leftMeters: Double, val rightMeters: Double, val frontMeters: Double, val rearMeters: Double
@@ -22,7 +24,14 @@ class AlleyWorld(
     var contact = false; private set
     var simulationSeconds = 0.0; private set
     private var lastDistance: Double? = null
-    fun obstacles(): List<ParkedCar> = parkedCars
+    private val bollardObstacles=safetyBollards.map {
+        ParkedCar(it.x,it.y,it.baseWidth,it.baseWidth,"안전봉")
+    }
+    fun obstacles(): List<ParkedCar> = parkedCars+bollardObstacles
+
+    /** The forward end stop must not prevent reversing away from the bollards. */
+    fun shouldStopAtEnd(speedMps: Double?)=
+        y>=END_STOP_Y && speedMps!=null && speedMps.isFinite() && speedMps>0
     fun reset() { x = 0.0; y = 4.0; heading = 0.0; contact = false; simulationSeconds = 0.0; lastDistance = null }
     fun restore(px: Double, py: Double, angle: Double, collided: Boolean, seconds: Double = 0.0) {
         if (px.isFinite() && py.isFinite() && angle.isFinite() && seconds.isFinite() && seconds >= 0) {
@@ -69,7 +78,7 @@ class AlleyWorld(
         if (abs(speedMps) < .1) return Guide(Advice.WAIT, "정차 중 · 주변을 확인하세요")
         if (speedMps < 0) return Guide(Advice.STOP, "후진 중 · 정차 후 후방을 확인하세요")
         fun score(turn: Double): Double {
-            val trial = AlleyWorld(parkedCars)
+            val trial = AlleyWorld(parkedCars,safetyBollards)
             trial.restore(x, y, heading, false, simulationSeconds)
             var minimum = current.meters
             repeat(25) {
@@ -123,6 +132,12 @@ class AlleyWorld(
     }
 
     companion object {
+        const val BOLLARD_START_Y=76.5
+        const val BOLLARD_SPACING=4.0
+        const val END_LINE_Y=100.0
+        const val END_STOP_Y=97.5
+        // A longitudinal centerline: leave room to pass either side and clear the last post.
+        val CENTER_BOLLARDS=List(5) { SafetyBollard(0.0,BOLLARD_START_Y+it*BOLLARD_SPACING) }
         val DEFAULT_PARKED = listOf(
             ParkedCar(-2.5, 14.0), ParkedCar(2.5, 22.0),
             ParkedCar(-2.4, 34.0), ParkedCar(2.4, 38.0),

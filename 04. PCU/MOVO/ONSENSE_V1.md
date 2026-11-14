@@ -9,13 +9,13 @@
 | 기능 | 버전 1 상태 |
 | --- | --- |
 | 차량 정보 | AAOS 차속·기어, Pleos 조향각·브레이크 수신. 원본 값은 진단에서 확인 |
-| 3D 골목 | 기존 가상 차량 운동·주차 차량·가상 벽의 거리 계산 유지 |
+| 3D 골목 | 기존 가상 차량 운동·주차 차량·가상 벽 유지. 도로 끝 안전봉 5개를 기하 장애물로 추가 |
 | 화면 구성 | 왼쪽 3D 골목 / 오른쪽 실내 그림 50:50, 상세 정보 접기/펼치기 |
-| 키보드 | Console → 에뮬레이터 → AAOS/Pleos 수신 경로 유지 |
+| 키보드 | 기존 Console → AAOS/Pleos 경로 유지. 별도로 실제 값이 바뀌지 않는 가상 키보드 모드 추가 |
 | 자동 시연 | 실제 Console 값을 변경하지 않는 10초 가상 입력 시나리오 |
 | 기능 2 | 좌우 경고·빨강 진입 3회 점멸·실내 조명 연출 |
-| 조명 연출 | 좌우 각각 16구간, 중앙→도어 순차 점등 / 도어→중앙 역순 소등 |
-| 거리별 표현 | 간격이 줄면 초록→노랑→주황→빨강 중간 색, 켜지는 구간 증가. 1.6m 이상 전부 소등 |
+| 조명 연출 | 좌우 각각 16구간을 기본 초록으로 유지. 경고색은 도어→중앙 방향으로 구간별 전파 |
+| 거리별 표현 | 간격이 줄면 경고색 영역 증가, 멀어지면 중앙→도어 순서로 초록 복귀. 1.6m 이상 전체 초록 |
 | Alley Pass | 정차·브레이크·거리 조건 확인 후 사용자 확인을 거치는 가상 매크로 |
 | 위치 | 기존 Pleos 위치 수신 진단 유지. 외부 지도 전송 없음 |
 | 실제 Light API | 지원 영역·변경 전 값·SET·GET 재조회·종료 복원 경로 유지 |
@@ -63,8 +63,9 @@ APK: `app\build\outputs\apk\debug\app-debug.apk`
 
 1. **3D 자동 시연**: 기존 10초 시나리오를 실행합니다. 실제 차속/기어를 바꾸지 않습니다.
 2. **SDK 연동 시작**: 최신 SDK 차속·조향으로 가상 차량을 움직입니다. 입력이 오래되면 이동을 보류합니다.
-3. **Console 키보드 연결**: debug Pleos AVD의 P·0km/h에서 연결한 뒤 D/R을 선택합니다. 앱 화면에 포커스를 두세요.
-4. ↑/W 길게: 가속, ↓/S: 브레이크, ←/A·→/D: 조향, Space: 정지, R: 정차/P에서 재준비.
+3. **가상 키보드 시연**: 실제 P·0km/h에서 시작합니다. '가상 R' 버튼 또는 R 키 → ↑/W로 후진, '가상 D' → ↑/W로 전진합니다. ↓/S 브레이크, Space 정지. 실제 SDK/Console 기어·속도는 변경하지 않습니다. 화면에 '가상' 기어가 표시됩니다.
+4. **Console 키보드 연결**: debug Pleos AVD의 P·0km/h에서 연결한 뒤 D/R을 선택합니다. 앱 화면에 포커스를 두세요.
+4. ↑/W 길게: 가속, ↓/S: 브레이크, ←/A·→/D: 조향, Space: 정지, R: 정차 상태에서 후진 기어 선택. R 기어에서 ↑/W는 후진 가속입니다. 재준비는 초기화/키보드 연결 버튼을 사용합니다.
 5. D는 기어 선택 키가 아니라 오른쪽 조향 키입니다. 기어는 화면의 D/R/N/P 버튼을 사용합니다.
 6. **3D 초기화**: 가상 위치·시연·매크로를 초기화하고 Console 제어를 중지합니다.
 7. **패스 매크로(SIM)**: 조건 충족 후 확인창의 **가상 실행**을 누릅니다. 미러·창문·비상등은 실제 제어가 아닙니다.
@@ -123,10 +124,12 @@ MainActivity의 수신기
 | populateCabin | 실내 그림, 조명 결과, 실제 조명 스위치 구성 |
 | populateAlleyHud / populateMacroBanner | 좌우 간격 HUD와 매크로 배너 배치 |
 | createControls / createGearControls | 하단 조작·기어 버튼 생성 |
+| requestGear | 화면 기어 버튼과 R 단축키의 공통 경로. 신선한 정차 입력에서 기어 요청 |
 | createMacroConfirmation / createActions | 실행 확인창과 SDK/시연/키보드/초기화/매크로 버튼 |
 | toggleSdkSimulation / resetScene | SDK 재개/일시정지, 가상 장면 초기화 |
 | requestMacroConfirmation | 매크로 조건 확인 및 사용자 확인창 열기 |
 | prepareScene / prepareKeyboard | 가상/SDK 입력 준비, Console 키보드 연결 준비 |
+| prepareVirtualKeyboard | 실제 P·0km/h를 확인한 뒤 독립 가상 키보드 입력 시작 |
 | motion | 가상 시나리오 또는 실제 신선한 수신값 선택. R 기어에서는 속도 부호 반전 |
 | tickFrame / frameDelta | 50ms 갱신 및 프레임 시간 계산 |
 | advanceWorld / finishSceneIfNeeded | 기존 가상 운동 호출, 시연 종료·접촉 정지 |
@@ -175,9 +178,10 @@ MainActivity의 수신기
 | AmbientStripAnimation.resume | 화면 복귀 시 애니메이션 시계 재설정 |
 | advance | 좌우 목표까지 독립 진행. 전체 길이 진행 시간 1800ms, 프레임 최대 64ms |
 | needsFrame | 목표와의 차이가 남은 경우에만 재그리기 요청 |
-| sectionOpacity | 16구간 각각의 등장·퇴장 투명도 계산 |
+| sectionOpacity | 구간별 보간 계수 계산 |
+| sectionColor | 도어 쪽부터 기본 초록과 경고색 사이의 중간 색 계산. 조명 자체는 끄지 않음 |
 
-접근 시 중앙→도어로 구간이 늘고, 멀어지면 도어→중앙으로 줄어듭니다.
+기본 상태는 모든 구간이 초록입니다. 접근 시 도어→중앙 순서로 경고색이 늘고, 멀어지면 중앙→도어 순서로 초록으로 돌아옵니다. 미확인 입력은 초록 대신 회색으로 구분합니다.
 색/구간 표시와 별개로 빨강 기준선은 500ms 전체 주기(250ms ON/OFF) 3회 점멸 후 고정하며 같은 빨강 구간에서는 반복하지 않습니다.
 실제 Light API에는 기존 경고 등급 변경을 전달합니다. 화면의 16구간 그림을 차량 하드웨어의 16영역 제어로 해석하면 안 됩니다.
 
@@ -195,6 +199,8 @@ MainActivity의 수신기
 | AlleyMacroPresentation.card | 기존 가상 매크로의 단계별 문구/표시 |
 | PleosConsoleDriver.start / press / release / select / stop / close | Console 연결·키 조작·기어 요청·종료 정차/복원 |
 | ConsoleDriveModel.select / press / release / tick / clear | 키 누름 상태에서 Console 명령 계산 |
+| VirtualKeyboardDrive.reset / stop / select / press / release / advance / input | 순수 로컬 가상 기어·키 입력·정지 처리. Context/SDK/HTTP 참조 없음 |
+| VehicleMotionInput.signedSpeed | R 수신 시 AAOS 속도 크기를 음수 이동 속도로 변환. 이미 음수여도 방향을 두 번 반전하지 않음 |
 | VehicleSpeedTest / VehicleGearSource | AAOS 차속·기어 start/stop |
 | PleosSteeringSource / PleosSteeringMapping | Pleos 조향 구독·해제 및 원본 각도 정규화 |
 | PleosBrakeTest | 기존 브레이크 구독 start/stop |
@@ -206,6 +212,28 @@ MainActivity의 수신기
 Alley3dView/Alley3dFrame/Alley3dRenderer는 기존 3D 전달·렌더링 경로를 유지합니다.
 VehicleInfoPanel과 AlleyVoiceCoach도 기존 정보 표시·음성 기능을 유지합니다.
 `com.example.myapplication`의 이전 Java 코드와 독립 SDK 시험 코드는 삭제하거나 새 실행 진입점으로 바꾸지 않았습니다.
+
+## 도로 끝 부근의 중앙선 안전봉
+
+- 안전봉은 도로를 가로막는 배치가 아니라 **중앙선 x=0**을 따라 y=76.5 / 80.5 / 84.5 / 88.5 / 92.5m에 4m 간격으로 놓입니다.
+- 높이 0.95m, 받침 폭 0.45m이며 주황 몸체와 흰 반사띠로 그립니다. 바닥의 좁은 노란 표시도 주행 방향과 평행합니다.
+- 안전봉 양옆으로 지나갈 수 있습니다. 예를 들어 차량 중심 x=+1.4m로 통과하면 왼쪽 안전봉 간격이 약 0.275m여서 왼쪽 빨강 경고가 나옵니다. x=-1.4m에서는 오른쪽이 같은 방식으로 경고됩니다.
+- 중앙선을 그대로 밟고 직진하면 안전봉과 가상 접촉합니다. 자동 회피/차선 고정 기능은 추가하지 않았습니다.
+- 마지막 안전봉을 충분히 지나갈 수 있도록 도로 끝은 y=100m, 전진 종료 위치는 차량 중심 y=97.5m로 옮겼습니다. 정차·후진은 종료 위치에서도 허용합니다.
+- 안전봉을 지나 멀어지면 경고가 해제됩니다. 차로 측 벽이나 기존 주차 차량이 가까우면 해당 장애물의 경고는 계속 유지됩니다.
+- 카메라/AI 검출이 아니라 등록된 가상 장애물의 거리 계산입니다. 화면과 충돌 계산은 같은 SafetyBollard 데이터를 사용합니다.
+- 시연: 실제 P·0km/h → 가상 키보드 시연 → 가상 D → 기존 주차 차량을 지난 뒤 중앙선의 한쪽으로 조향 → 안전봉 옆 통과. 기존 10초 자동 시연은 변경하지 않았습니다.
+
+| 파일·함수 | 담당 |
+| --- | --- |
+| AlleyWorld.SafetyBollard / CENTER_BOLLARDS | 중앙선 안전봉 위치·높이·받침 크기 |
+| BOLLARD_START_Y / BOLLARD_SPACING | 시작 위치 및 4m 간격 |
+| AlleyWorld.obstacles / clearance | 받침을 기존 다각형 거리·충돌 계산에 포함 |
+| AlleyWorld.shouldStopAtEnd | 전체 안전봉 구간 이후의 전진 정지 |
+| Alley3dView.publish / Alley3dFrame | 같은 위치를 GL 스레드에 불변 스냅샷 전달 |
+| Alley3dRenderer.drawCenterlineBollards / drawSafetyBollard | 중앙선의 세로 표시와 안전봉·반사띠 렌더링 |
+| cylinderMesh / bindBollardMesh / cylinder | 원통형 메시 재사용 |
+| finishSceneIfNeeded | 종료 시 가상 입력 정지, R 재선택 허용 |
 
 ## 6. 기능 보존을 위한 수정 위치
 
@@ -223,18 +251,25 @@ VehicleInfoPanel과 AlleyVoiceCoach도 기존 정보 표시·음성 기능을 �
 ## 7. 버전 1 검증 기록
 
 - 빌드: `:app:assembleDebug` 성공.
-- 단위 테스트: `:app:testDebugUnitTest` **73개 통과**, 실패 0.
-- 기존 67개 테스트와 구간 애니메이션 회귀 테스트 6개를 포함합니다.
+- 단위 테스트: `:app:testDebugUnitTest` **86개 통과**, 실패 0.
+- 기존 80개와 중앙선 안전봉 6개 테스트를 포함합니다: 세로 간격, 좌우 방향별 경고, 양쪽 차로의 전 구간 무접촉 통과, 통과 후 초록 복귀, 중앙선 충돌, 기존 시작 상태 유지.
 - 추가 확인: 좌우 독립 점등/소등, 구간별 중간 투명도, 바깥쪽 우선 소등, 화면 복귀 시 시간 보존, 긴/역행 시간의 점프 방지, 비정상 목표값 처리.
 - 설치: Pleos AVD `emulator-5554`에 정리한 앱 설치 성공.
 - AVD 자동 시연 완료: 좌측 가상 0.70m 주황 / 우측 2.50m 초록, 실내 구간 조명 표시 확인.
 - Alley Pass: 조건 충족 → 확인창 → 가상 실행 → '가상 실행 완료 · SIMULATION' 화면 확인.
-- 초기화: 좌우 2.60m로 복귀하고 실내 조명 구간이 꺼진 화면 확인.
+- 이전 기준의 초기화: 좌우 2.60m 복귀와 소등을 확인했습니다. 최신 변경은 소등 대신 초록 기본색 복귀입니다.
 - 진단 정보 펼침/접기 및 기본 화면 복귀 확인.
 - P·0km/h에서 Console 키보드 연결 성공. 기어 P 재조회와 D 조향 키 DOWN/UP 수신 확인.
 - 실제 로그: KEY_DOWN code=32 control=RIGHT accepted=true → CONTROL_REQUEST speedKmh=0 steering=500 → Pleos 콜백 raw=-500.0 normalized=1.0 → KEY_UP → steering=0.
 - 검증 종료 시 Console STOP_VERIFIED speed=0 gear=P 로그 확인.
-- 이번 AVD 회귀 시험의 키 조작은 P·0km/h에서 수행했습니다. D/R 기어로 장거리 이동하는 시험 및 실차 주행은 이번에 반복하지 않았습니다.
+- 실제 R 전환 시험: Pleos 후방카메라 ai.umos.car.evs.CarEvsCameraPreviewActivity가 전면에 표시되고, 기존 포커스 상실 처리가 Console을 정지/P 복귀시키는 것을 확인했습니다. 후방카메라를 비활성화하거나 주행 제한을 우회하지 않았습니다.
+- 이를 위해 실제 Console 모드와 분리한 가상 키보드 시연을 추가했습니다. 가상 R + W 입력으로 y=4.0000m → 3.3330m 후진, 가상 D + W 입력으로 y=3.3330m → 3.9727m 전진, Space 정지를 실제 앱 로그에서 확인했습니다.
+- 해당 로그 출처는 source=VIRTUAL_KEYBOARD입니다. 같은 시험 후 Virtual Console 재조회는 actualGear=Park, actualSpeedKph=0이었습니다.
+- 최신 중앙선 세로 배치: 빌드·단위 테스트 및 Pleos AVD 설치 완료. x=±1.4m 차로에서 y=72→96m를 모두 통과하며 해당 방향 안전봉 경고가 발생하고, 접촉 없이 빠져나오는 것을 기하/운동 테스트로 검증했습니다.
+- 이전 가로 배치의 y=74m 정지·후진 시험 기록은 현재 배치의 기준이 아닙니다. 최신 중앙선 배치의 수동 AVD 전 구간 통과는 이번 수정에서 별도로 재현하지 않았으며 위 통과 결과는 자동 테스트 결과입니다.
+- 이 시험은 실제 기어 P·0km/h를 유지한 가상 키보드 주행입니다. 안전봉은 등록된 가상 장애물 거리 계산이며 카메라 감지가 아닙니다.
+- 기본 초록 조명이 전체 구간에 표시된 화면을 확인했습니다. 그라데이션은 기존 중앙→도어에서 도어→중앙 경고색 전파로 반전했고, 거리가 멀어지면 초록으로 복귀합니다.
+- 실제 R 상태에서 On-sense 화면을 강제로 유지하거나 실차 후진을 검증한 결과는 아닙니다.
 - 실제 차량 Light 색 적용 성공·주행 중 제어·실차 성능은 이번 리팩터링으로 검증 완료된 항목이 아닙니다.
 
 이 문서는 V1 기능 기준과 유지보수 안내이며 APK 서명·배포 승인·실차 검증을 대신하지 않습니다.

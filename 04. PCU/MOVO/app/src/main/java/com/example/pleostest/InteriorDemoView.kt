@@ -77,7 +77,7 @@ class InteriorDemoView(context: Context) : View(context) {
     }
 
 
-    private fun drawAmbientStrip(c: Canvas,points: FloatArray,tint: Int,progress: Float) {
+    private fun drawAmbientStrip(c: Canvas,points: FloatArray,side: SideClearanceWarning.Side,progress: Float) {
         val path=Path(); path.moveTo(points[0],points[1])
         for(i in 2 until points.size step 2) path.lineTo(points[i],points[i+1])
         p.shader=null; p.style=Paint.Style.STROKE
@@ -88,9 +88,11 @@ class InteriorDemoView(context: Context) : View(context) {
         val length=measure.length/segments
         val segment=Path()
         for(index in 0 until segments) {
-            // Each section fades in locally before the next one starts.
-            val opacity=AmbientStripAnimation.sectionOpacity(progress,index)
-            if(opacity<=0f) continue
+            // Keep every section lit green; only its color changes, door -> center.
+            val base=if(side.level==SideClearanceWarning.Level.UNKNOWN)
+                SideClearanceWarning.Level.UNKNOWN.argb else SideClearanceWarning.Level.GREEN.argb
+            val tint=AmbientStripAnimation.sectionColor(progress,index,base,side.ambientArgb)
+            val opacity=1f
             segment.rewind()
             measure.getSegment(index*length+3f,(index+1)*length-3f,segment,true)
             p.color=tint
@@ -115,9 +117,9 @@ class InteriorDemoView(context: Context) : View(context) {
 
     private fun drawAmbientStrips(c: Canvas) {
         // One continuous route per side: dashboard center, outer trim, then door.
-        // Distance controls how many sections are lit; each side advances independently.
-        drawAmbientStrip(c,floatArrayOf(485f,430f,385f,430f,155f,419f,77f,421f,185f,456f,220f,530f),frame.left.ambientArgb,animation.leftProgress)
-        drawAmbientStrip(c,floatArrayOf(585f,430f,685f,430f,845f,419f,923f,421f,815f,456f,780f,530f),frame.right.ambientArgb,animation.rightProgress)
+        // Distance controls warning-color coverage; the whole strip stays lit in base green.
+        drawAmbientStrip(c,floatArrayOf(485f,430f,385f,430f,155f,419f,77f,421f,185f,456f,220f,530f),frame.left,animation.leftProgress)
+        drawAmbientStrip(c,floatArrayOf(585f,430f,685f,430f,845f,419f,923f,421f,815f,456f,780f,530f),frame.right,animation.rightProgress)
         drawRect(c,115f,474f,183f,486f,0xFF91A1AA,5f)
         drawRect(c,817f,474f,885f,486f,0xFF91A1AA,5f)
     }

@@ -4,6 +4,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AmbientStripAnimationTest {
+    @Test fun wholeStripStartsGreenAndWarningColorBeginsAtDoor() {
+        val green=SideClearanceWarning.Level.GREEN.argb
+        val red=SideClearanceWarning.Level.RED.argb
+        for(i in 0 until 16) assertEquals(green,AmbientStripAnimation.sectionColor(0f,i,green,red))
+        assertEquals(green,AmbientStripAnimation.sectionColor(.5f/16,0,green,red))
+        val door=AmbientStripAnimation.sectionColor(.5f/16,15,green,red)
+        assertNotEquals(green,door); assertNotEquals(red,door)
+        for(i in 0 until 16) assertEquals(red,AmbientStripAnimation.sectionColor(1f,i,green,red))
+    }
+    @Test fun retreatReturnsCenterToGreenBeforeDoorWithoutTurningOff() {
+        val green=SideClearanceWarning.Level.GREEN.argb
+        val orange=SideClearanceWarning.Level.ORANGE.argb
+        assertEquals(green,AmbientStripAnimation.sectionColor(14f/16,0,green,orange))
+        assertEquals(orange,AmbientStripAnimation.sectionColor(14f/16,15,green,orange))
+        for(i in 0 until 16) {
+            val color=AmbientStripAnimation.sectionColor(0f,i,green,orange)
+            assertEquals(green,color); assertEquals(255,color ushr 24)
+        }
+    }
     @Test fun expandsAndFullyRetractsWithIndependentSides() {
         val a=AmbientStripAnimation(); a.resume(100)
         for(i in 1..30) a.advance(100+i*64L,1f,0f)

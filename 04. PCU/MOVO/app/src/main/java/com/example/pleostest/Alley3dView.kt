@@ -16,8 +16,11 @@ class Alley3dView(context: Context) : GLSurfaceView(context) {
     }
     fun publish(world: AlleyWorld, gap: AlleyWorld.Clearance) {
         val cars = world.parkedCars.map { floatArrayOf(it.x.toFloat(), it.y.toFloat(), it.width.toFloat(), it.length.toFloat(), 0f) }
+        val bollards=world.safetyBollards.map {
+            floatArrayOf(it.x.toFloat(),it.y.toFloat(),it.baseWidth.toFloat(),it.height.toFloat())
+        }
         sceneRenderer.frame = Alley3dFrame(world.x.toFloat(), world.y.toFloat(), world.heading.toFloat(),
-            floatArrayOf(gap.leftMeters.toFloat(), gap.rightMeters.toFloat()), cars.toTypedArray())
+            floatArrayOf(gap.leftMeters.toFloat(), gap.rightMeters.toFloat()), cars.toTypedArray(),bollards.toTypedArray())
         requestRender()
     }
 }
