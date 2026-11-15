@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- PC 라벨링 서버(HTTP) 접속 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/Theme.GuardiansViewer">
+        <uses-library android:name="android.car" android:required="false" />
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize|stateHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 에뮬레이터 개발용: 주행 중 UX 제한에서 화면 유지 -->
+            <meta-data android:name="distractionOptimized" android:value="true" />
+        </activity>
+
+        <activity
+            android:name=".ui.ViewerActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            <meta-data android:name="distractionOptimized" android:value="true" />
+        </activity>
+    </application>
+</manifest>
