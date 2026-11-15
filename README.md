@@ -150,27 +150,18 @@ LEGACY_SERVER=                     # 이미 설치된 라벨링 서버 폴더가
 
 ---
 
-## 제출용 APK 만들기 (Pleos App Market)
-
-1. `Carity.bat` → **11** 서명 키 만들기. 비밀번호를 입력합니다. 만들어진 `release\carity-release.jks`와 비밀번호는 꼭 따로 백업하세요.
-2. `Carity.bat` → **12** 제출용 APK 빌드. `release\Cardiance_Carity_release.apk`(버전·SHA-256은 같은 이름의 `.txt`)가 만들어지고, 원하면 에뮬레이터에 바로 설치합니다.
-3. `Carity.bat` → **13**으로 스토어 스크린샷을 찍습니다.
-4. `release\제출_체크리스트.md`를 보고 콘솔에 등록합니다(설명 초안, 아이콘, 개인정보처리방침 초안 포함).
-
-제출용 APK는 PC 서버 없이 혼자 동작합니다. AI 문장 다듬기, PC 라벨 불러오기, 위치 진단, 개발용 버튼은 빠지고 규칙 엔진 판단, 앱 내장 라벨 장면, Pleos 음성 안내만 들어갑니다. 패키지 이름은 `com.carity.app`이라 개발용 앱과 따로 설치됩니다.
-
----
-
 ## 받은 APK로 바로 실행하기
 
 PC 서버 없이 앱만 확인할 때의 방법입니다. 제출용 APK는 규칙 엔진 판단, 앱 내장 라벨 장면 6개, Pleos 음성 안내로 혼자 동작합니다.
 
 1. Android Studio **Device Manager**에서 Pleos Connect 에뮬레이터(`Pleos_Connect_v2.1.0`)를 켭니다. 화면이 멈추면 **Cold Boot Now**로 다시 켭니다.
+
 2. APK를 설치합니다. 에뮬레이터 창에 APK 파일을 끌어다 놓거나, 명령으로 설치합니다.
    
    ```powershell
    adb install -r release\Cardiance_Carity_release.apk
    ```
+
 3. (권장) 차속·음성 권한을 미리 허용합니다. 허용하지 않으면 실행 중 권한 창이 뜰 수 있습니다.
    
    ```powershell
@@ -178,6 +169,7 @@ PC 서버 없이 앱만 확인할 때의 방법입니다. 제출용 APK는 규�
    adb shell pm grant --user $u com.carity.app android.car.permission.CAR_SPEED
    adb shell pm grant --user $u com.carity.app pleos.car.permission.TTS_SERVICE
    ```
+
 4. 앱 목록에서 **Carity 시뮬레이션**을 엽니다. 오른쪽 패널 **[라벨 장애물·AI 판단]** → **장면 선택** → **3D 자동 시연**. **Carity 튜토리얼**은 장면을 고르면 6단계가 자동으로 진행됩니다.
 
 ## 테스트 환경
