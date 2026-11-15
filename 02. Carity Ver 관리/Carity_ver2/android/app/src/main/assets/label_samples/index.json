@@ -1,8 +1,0 @@
-{"samples":[
- {"file":"REC2_20261114_113108.json","t":18.0,"expect":"CLEAR","title":"양쪽 주차 골목 · 여유 통과"},
- {"file":"REC2_20261114_113108.json","t":29.9,"expect":"CLEAR","title":"좌측 주차차 옆 통과"},
- {"file":"REC2_20261114_114202.json","t":8.6,"expect":"CLEAR","title":"우측 차량 근접 · 왼쪽으로 비켜 통과"},
- {"file":"REC2_20261114_112432.json","t":7.7,"expect":"CLEAR","title":"좁은 골목 · 감속 통과"},
- {"file":"REC2_20261114_113906.json","t":24.0,"expect":"BLOCKED","title":"양쪽 주차로 막힌 골목 · 정차"},
- {"file":"REC2_20261114_114118.json","t":4.4,"expect":"BLOCKED","title":"대향차 접근 · 정차 후 양보"}
-]}

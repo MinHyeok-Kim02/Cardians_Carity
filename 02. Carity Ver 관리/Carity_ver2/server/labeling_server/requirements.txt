@@ -1,8 +1,0 @@
-# torch 는 setup_server.bat 에서 CUDA 12.8 빌드(RTX 50 시리즈 지원)로 먼저 설치합니다.
-ultralytics>=8.3.0
-lap>=0.5.12
-fastapi>=0.110
-uvicorn>=0.29
-imageio-ffmpeg>=0.5
-opencv-python
-numpy
