@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pleos App Market 제출용(release) 매니페스트 병합 규칙.
+  심사 기준: 서비스에 필요한 권한만 선언 (승인되지 않은 Vehicle SDK 권한이 있으면 심사 불가).
+  release 빌드에서 쓰지 않는 기능의 권한을 제거합니다.
+   - FUSED_LOCATION : 위치 진단은 debug 전용 (위치 약관 URL 이 필요해지는 것을 방지)
+   - CAR_WINDOWS / CAR_MIRRORS : 차량 제어 시험(debug 에뮬레이터 전용) 에서만 사용, Alley Pass 매크로는 가상 실행
+   - CAR_LIGHTS : 실제 조명 API 는 debug 에뮬레이터에서만 동작 (화면의 실내 조명은 그림 연출)
+  distractionOptimized 는 debug 매니페스트에만 있으므로 release 는 주행 중 화면 제한을 따릅니다.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" tools:node="remove" />
+    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" tools:node="remove" />
+    <uses-permission android:name="pleos.car.permission.CAR_MIRRORS" tools:node="remove" />
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" tools:node="remove" />
+    <!-- FusedLocation SDK 라이브러리가 자동으로 넣는 위치 서비스 연결 권한 (release 는 위치를 쓰지 않음) -->
+    <uses-permission android:name="ai.pleos.playground.service.location.fused.FUSED_LOCATION_BINDING" tools:node="remove" />
+</manifest>

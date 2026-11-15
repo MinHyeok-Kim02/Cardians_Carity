@@ -103,7 +103,7 @@ class TutorialActivity : AppCompatActivity() {
             setBackgroundColor(Color.rgb(9, 15, 22))
         }
         side.addView(label("CARITY 튜토리얼 · 좁은 길 통과", 16, teal).apply { setTypeface(typeface, Typeface.BOLD) })
-        side.addView(label("판단 AI: ${ai.providerText} · 규칙 엔진이 최종 결정", 12, muted))
+        side.addView(label(if (CarityFeatures.aiEnabled) "판단 AI: ${ai.providerText} · 규칙 엔진이 최종 결정" else "판단: 규칙 엔진 (기기 안에서 즉시 판단)", 12, muted))
         side.addView(voiceText)
         configure(sceneButton, "장면 선택 ▾") { chooseScene() }
         side.addView(sceneButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)))

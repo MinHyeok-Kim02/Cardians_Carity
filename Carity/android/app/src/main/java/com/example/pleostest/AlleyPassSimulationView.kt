@@ -83,6 +83,9 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
     private val emulator = android.os.Build.HARDWARE in listOf("ranchu", "goldfish")
     private val debugEmulator = emulator &&
         (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    private val debuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    /** 3D 자동 시연은 실제 차량 값을 바꾸지 않는 가상 주행이므로 제출용(release)에서도 정차 중에 허용 */
+    private val demoAllowed = debugEmulator || !debuggable
     private val main = Handler(Looper.getMainLooper())
     private var active = false
     private var running = false
@@ -244,7 +247,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
             world.restore(restored.getDouble("world.x", 0.0), restored.getDouble("world.y", 4.0),
                 restored.getDouble("world.heading", 0.0), restored.getBoolean("world.contact", false),
                 restored.getDouble("world.seconds", 0.0))
-            demoMode = restored.getBoolean("demo.mode", false) && debugEmulator
+            demoMode = restored.getBoolean("demo.mode", false) && demoAllowed
             demoSeconds = restored.getDouble("demo.seconds", 0.0).takeIf { it.isFinite() }?.coerceIn(0.0, AlleyDemoScenario.DURATION_SECONDS) ?: 0.0
         }
     }
@@ -272,6 +275,7 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         locationBar.addView(locationStatus, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         configure(locationControl, "위치 수신 시작") { locationAction?.invoke() }
         locationBar.addView(locationControl, LinearLayout.LayoutParams(dp(150), dp(50)))
+        if (!CarityFeatures.locationEnabled) locationControl.visibility = GONE
         return locationBar
     }
 
@@ -914,13 +918,17 @@ class AlleyPassSimulationView(context: Context, restored: Bundle?) : FrameLayout
         val v=input.speed
         start.show(if (!keyboardMode && !virtualKeyboardMode && !demoMode && running) "SDK 일시정지" else "SDK 연동 시작")
         start.isEnabled = active && !restricted && !macroBusy
-        demo.isEnabled = active && !restricted && debugEmulator && !macroBusy
+        demo.isEnabled = active && !restricted && demoAllowed && !macroBusy
+        // Console·가상 키보드·기어 요청·실제 조명 연동은 에뮬레이터 개발용 → 제출용(release)에서는 숨김
+        val devVisibility = if (debuggable) VISIBLE else GONE
+        keyboard.visibility = devVisibility; virtualKeyboard.visibility = devVisibility; ambientToggle.visibility = devVisibility
         keyboard.isEnabled = active && !restricted && debugEmulator && !macroBusy
         virtualKeyboard.isEnabled=active && !restricted && debugEmulator && !macroBusy && parkConfirmed()
         reset.isEnabled = active && !restricted
         for ((value,button) in gearButtons) {
             val selected=if(virtualKeyboardMode) virtualDrive.gear else freshGear(now)
             button.text=(if(virtualKeyboardMode) "가상 " else "")+value.name+if(selected==value) " ✓" else ""
+            button.visibility = if (debuggable) VISIBLE else GONE
             button.isEnabled=active && debugEmulator && !macroBusy && selected!=value && v!=null &&
                 ((virtualKeyboardMode && !restricted) || (keyboardMode && consoleDriver.connected)) &&
                 (value==ConsoleDriveModel.Gear.N || abs(v)<=.01)

@@ -16,7 +16,7 @@ class AiJudge(
     private val qwenBaseUrl: String = "http://10.0.2.2:11434",
     private val qwenModel: String = "qwen2.5:3b",
 ) {
-    enum class Provider(val label: String) { CLAUDE("Claude"), QWEN("Qwen") }
+    enum class Provider(val label: String) { CLAUDE("Claude"), QWEN("Qwen"), NONE("규칙 엔진") }
 
     data class Result(
         val provider: String, val ok: Boolean,
@@ -27,11 +27,20 @@ class AiJudge(
     /** 규칙 + AI 결합 결과 */
     data class Final(val action: AlleyDecisionEngine.Action, val speech: String, val source: String, val aiAgrees: Boolean?)
 
-    val provider get() = if (claudeKey.isNotBlank()) Provider.CLAUDE else Provider.QWEN
-    val providerText get() = if (provider == Provider.CLAUDE) "Claude · $claudeModel" else "Qwen · $qwenModel"
+    val provider get() = when {
+        claudeKey.isNotBlank() -> Provider.CLAUDE
+        qwenBaseUrl.isNotBlank() -> Provider.QWEN
+        else -> Provider.NONE   // release(단독 실행) 빌드: AI 호출 없이 규칙 엔진 문장 사용
+    }
+    val providerText get() = when (provider) {
+        Provider.CLAUDE -> "Claude · $claudeModel"
+        Provider.QWEN -> "Qwen · $qwenModel"
+        Provider.NONE -> "규칙 엔진"
+    }
 
     /** 네트워크 호출 (백그라운드 스레드에서 호출) */
     fun judge(decision: AlleyDecisionEngine.Decision): Result {
+        if (provider == Provider.NONE) return Result(providerText, false, null, null, null, 0, DISABLED)
         val started = System.currentTimeMillis()
         return try {
             val text = if (provider == Provider.CLAUDE) callClaude(decision) else callQwen(decision)
@@ -85,6 +94,8 @@ class AiJudge(
     companion object {
         /** PC CPU 의 Qwen 2.5 3B 는 10~20초 걸릴 수 있음 (처음 호출은 모델 적재로 더 김) */
         const val QWEN_TIMEOUT_MS = 45000
+        /** AI 를 쓰지 않는 빌드에서 Result.error 로 돌려주는 표시 */
+        const val DISABLED = "AI 사용 안 함"
         /** TTS 프롬프팅: 차 안에서 바로 읽을 짧은 한국어 한 문장을 만들도록 지시 */
         val SYSTEM_PROMPT = """
 당신은 현대자동차 Pleos 차량의 초보 운전자 음성 코치입니다.

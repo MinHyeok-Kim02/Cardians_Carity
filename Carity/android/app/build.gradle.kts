@@ -22,6 +22,19 @@ fun envValue(vararg keys: String, default: String = ""): String =
     keys.firstNotNullOfOrNull { k -> dotEnv[k]?.takeIf { it.isNotBlank() } } ?: default
 fun javaString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+/**
+ * 릴리스(Pleos App Market 제출용) 설정. 모두 .env 에서 읽습니다. (Carity.bat releasekey 가 자동으로 채움)
+ *  RELEASE_STORE_FILE      서명 키 파일 (Carity 폴더 기준 상대경로 또는 절대경로)
+ *  RELEASE_STORE_PASSWORD  키 저장소 비밀번호
+ *  RELEASE_KEY_ALIAS       키 별칭 (기본 carity)
+ *  RELEASE_KEY_PASSWORD    키 비밀번호 (비우면 저장소 비밀번호와 같음)
+ *  RELEASE_APP_ID          제출용 패키지 이름 (기본 com.carity.app). debug 는 com.example.pleostest 유지
+ */
+val releaseStoreFile: File? = envValue("RELEASE_STORE_FILE").takeIf { it.isNotBlank() }?.let { path ->
+    File(path).let { if (it.isAbsolute) it else rootProject.file("../$path") }
+}?.takeIf { it.isFile }
+val releaseAppId = envValue("RELEASE_APP_ID", default = "com.carity.app")
+
 android {
     buildFeatures { buildConfig = true }
     namespace = "com.example.pleostest"
@@ -34,29 +47,58 @@ android {
         applicationId = "com.example.pleostest"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "ANTHROPIC_API_KEY", javaString(envValue("ANTHROPIC_API_KEY", "CLAUDE_API_KEY")))
         buildConfigField("String", "CLAUDE_MODEL", javaString(envValue("CLAUDE_MODEL", default = "claude-haiku-5-5")))
-        buildConfigField("String", "QWEN_BASE_URL", javaString(envValue("QWEN_BASE_URL", default = "http://10.0.2.2:11434")))
         buildConfigField("String", "QWEN_MODEL", javaString(envValue("QWEN_MODEL", default = "qwen2.5:3b")))
-        buildConfigField("String", "LABEL_SERVER_URL", javaString(envValue("LABEL_SERVER_URL", default = "http://10.0.2.2:8765")))
+    }
+
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = envValue("RELEASE_STORE_PASSWORD")
+                keyAlias = envValue("RELEASE_KEY_ALIAS", default = "carity")
+                keyPassword = envValue("RELEASE_KEY_PASSWORD", "RELEASE_STORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            // 에뮬레이터 개발·시연용: PC 의 Qwen(Ollama)·라벨링 서버·위치 진단 사용
+            buildConfigField("String", "ANTHROPIC_API_KEY", javaString(envValue("ANTHROPIC_API_KEY", "CLAUDE_API_KEY")))
+            buildConfigField("String", "QWEN_BASE_URL", javaString(envValue("QWEN_BASE_URL", default = "http://10.0.2.2:11434")))
+            buildConfigField("String", "LABEL_SERVER_URL", javaString(envValue("LABEL_SERVER_URL", default = "http://10.0.2.2:8765")))
+            buildConfigField("boolean", "LOCATION_ENABLED", "true")
+        }
         release {
+            // Pleos App Market 제출용: PC 서버 없이 단독 실행. API 키는 넣지 않음 (APK 에서 추출 가능)
+            buildConfigField("String", "ANTHROPIC_API_KEY", javaString(""))
+            buildConfigField("String", "QWEN_BASE_URL", javaString(envValue("RELEASE_QWEN_BASE_URL")))
+            buildConfigField("String", "LABEL_SERVER_URL", javaString(envValue("RELEASE_LABEL_SERVER_URL")))
+            buildConfigField("boolean", "LOCATION_ENABLED", "false")
+            if (releaseStoreFile != null) signingConfig = signingConfigs.getByName("release")
+            // R8 최적화를 끕니다. androidx·kotlin 패키지만 최적화(packageScope)하면 kotlin 내부 클래스 접근 오류
+            // (IllegalAccessError: kotlin.collections ... is inaccessible)로 실행 직후 꺼지는 문제가 있었습니다.
             optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                enable = false
             }
         }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+// 제출용(release) APK 만 패키지 이름을 바꿉니다. debug 는 기존 이름 그대로라 실행기·권한 스크립트가 그대로 동작
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.applicationId.set(releaseAppId)
     }
 }
 

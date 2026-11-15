@@ -1,8 +1,6 @@
-<p align="ce
-
 # Carity — 좁은 길 통과 보조
 
-![version](https://img.shields.io/badge/version-2.0.0-blue) ![platform](https://img.shields.io/badge/Pleos%20Connect-Android%2014-blue)
+![version](https://img.shields.io/badge/version-2.1.0-blue) ![platform](https://img.shields.io/badge/Pleos%20Connect-Android%2014-blue)
 
 초보 운전자가 **좁은 골목, 양쪽 주차 구간, 좁은 길 대향차** 상황을 지나갈 수 있도록
 남은 간격과 지나갈 길을 계산하고 **음성과 화면으로 안내**하는 Pleos 차량용 앱입니다.
@@ -122,41 +120,57 @@ LEGACY_SERVER=                     # 이미 설치된 라벨링 서버 폴더가
 
 ## 메뉴 전체
 
-| 메뉴  | 명령                    | 설명                                      |
-| --- | --------------------- | --------------------------------------- |
-| 1   | `Carity.bat start`    | 전체 시작                                   |
-| 2   | `Carity.bat setup`    | 처음 설치                                   |
-| 3   | `Carity.bat build`    | 앱 2개 다시 빌드·설치 (코드나 `.env`의 AI 키를 바꾼 뒤)  |
-| 4   | `Carity.bat server`   | 라벨링 서버만 실행                              |
-| 5   | `Carity.bat status`   | 서버, Ollama, 에뮬레이터, 앱 설치, 현재 화면 점검       |
-| 6   | `Carity.bat logs`     | 앱 로그를 `logs\`에 저장                       |
-| 7   | `Carity.bat copydata` | 영상·라벨을 `data\`로 복사                      |
-| 8   | `Carity.bat stopall`  | 서버·빌드 데몬·adb 등 Carity 폴더를 잡고 있는 프로그램 종료 |
-| 9   | `Carity.bat diag`     | 에뮬레이터 → PC 네트워크 진단                      |
-| 10  | `Carity.bat reset`    | 에뮬레이터를 처음 상태로 다시 부팅하고 앱을 최신 빌드로 재설치     |
-| —   | `Carity.bat stop`     | 라벨링 서버만 종료                              |
+| 메뉴  | 명령                      | 설명                                                       |
+| --- | ----------------------- | -------------------------------------------------------- |
+| 1   | `Carity.bat start`      | 전체 시작                                                    |
+| 2   | `Carity.bat setup`      | 처음 설치                                                    |
+| 3   | `Carity.bat build`      | 앱 2개 다시 빌드·설치 (코드나 `.env`의 AI 키를 바꾼 뒤)                   |
+| 4   | `Carity.bat server`     | 라벨링 서버만 실행                                               |
+| 5   | `Carity.bat status`     | 서버, Ollama, 에뮬레이터, 앱 설치, 현재 화면 점검                        |
+| 6   | `Carity.bat logs`       | 앱 로그를 `logs\`에 저장 (앱 실행·강제 종료 기록 포함)                     |
+| 7   | `Carity.bat copydata`   | 영상·라벨을 `data\`로 복사                                       |
+| 8   | `Carity.bat stopall`    | 서버·빌드 데몬·adb 등 Carity 폴더를 잡고 있는 프로그램 종료                  |
+| 9   | `Carity.bat diag`       | 에뮬레이터 → PC 네트워크 진단                                       |
+| 10  | `Carity.bat reset`      | 에뮬레이터를 처음 상태로 다시 부팅하고 앱을 최신 빌드로 재설치                      |
+| 11  | `Carity.bat releasekey` | 제출용 서명 키 만들기 (처음 1회)                                     |
+| 12  | `Carity.bat release`    | Pleos App Market 제출용 APK 빌드 → `release\Carity-2.0.0.apk` |
+| 13  | `Carity.bat shot`       | 스토어 스크린샷 (에뮬레이터 화면 PNG → `release\store\`)               |
+| —   | `Carity.bat stop`       | 라벨링 서버만 종료                                               |
 
 실행 기록은 `logs\carity.log`에 남습니다.
 
 ---
 
+## 제출용 APK 만들기 (Pleos App Market)
+
+1. `Carity.bat` → **11** 서명 키 만들기. 비밀번호를 입력합니다. 만들어진 `release\carity-release.jks`와 비밀번호는 꼭 따로 백업하세요.
+2. `Carity.bat` → **12** 제출용 APK 빌드. `release\Carity-2.0.0.apk`가 만들어지고, 원하면 에뮬레이터에 바로 설치합니다.
+3. `Carity.bat` → **13**으로 스토어 스크린샷을 찍습니다.
+4. `release\제출_체크리스트.md`를 보고 콘솔에 등록합니다(설명 초안, 아이콘, 개인정보처리방침 초안 포함).
+
+제출용 APK는 PC 서버 없이 혼자 동작합니다. AI 문장 다듬기, PC 라벨 불러오기, 위치 진단, 개발용 버튼은 빠지고 규칙 엔진 판단, 앱 내장 라벨 장면, Pleos 음성 안내만 들어갑니다. 패키지 이름은 `com.carity.app`이라 개발용 앱과 따로 설치됩니다.
+
+---
+
 ## 설정 (`.env`)
 
-| 키                    | 기본값                                         | 설명                                               |
-| -------------------- | ------------------------------------------- | ------------------------------------------------ |
-| `ANTHROPIC_API_KEY`  | (비움)                                        | 넣으면 Claude 사용, 비우면 Qwen. **바꾼 뒤 메뉴 3(build) 필요** |
-| `CLAUDE_MODEL`       | `claude-haiku-5-5`                          | Claude 모델                                        |
-| `QWEN_MODEL`         | `qwen2.5:3b`                                | Ollama 모델                                        |
-| `QWEN_BASE_URL`      | `http://10.0.2.2:11434`                     | 앱에서 본 Ollama 주소                                  |
-| `DATA_ROOT`          | `D:\02. SSAFY\Hyundai Test`                 | 영상·라벨 폴더. 상대경로(`data`)는 Carity 폴더 기준             |
-| `SERVER_PORT`        | `8765`                                      | 라벨링 서버 포트                                        |
-| `SERVER_ARGS`        | (비움)                                        | 예: `--force-cpu`                                 |
-| `LABEL_SERVER_URL`   | `http://10.0.2.2:8765`                      | 앱에서 본 라벨링 서버 주소                                  |
-| `LEGACY_SERVER`      | `D:\02. SSAFY\Hyundai Test\labeling_server` | 이미 설치된 서버 Python 환경 위치. 있으면 그대로 사용               |
-| `EMULATOR_AVD`       | (비움)                                        | 비우면 이름에 Pleos가 들어간 AVD 자동 선택                     |
-| `EMULATOR_COLD_BOOT` | `false`                                     | `true`면 항상 처음 상태로 부팅                             |
-| `BUILD_ON_START`     | `false`                                     | `true`면 시작할 때마다 앱을 다시 빌드                         |
-| `ANDROID_SDK`        | (비움)                                        | 비우면 `%LOCALAPPDATA%\Android\Sdk`                 |
+| 키                      | 기본값                                         | 설명                                                                |
+| ---------------------- | ------------------------------------------- | ----------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`    | (비움)                                        | 넣으면 Claude 사용, 비우면 Qwen. **바꾼 뒤 메뉴 3(build) 필요**                  |
+| `CLAUDE_MODEL`         | `claude-haiku-5-5`                          | Claude 모델                                                         |
+| `QWEN_MODEL`           | `qwen2.5:3b`                                | Ollama 모델                                                         |
+| `QWEN_BASE_URL`        | `http://10.0.2.2:11434`                     | 앱에서 본 Ollama 주소                                                   |
+| `DATA_ROOT`            | `D:\02. SSAFY\Hyundai Test`                 | 영상·라벨 폴더. 상대경로(`data`)는 Carity 폴더 기준                              |
+| `SERVER_PORT`          | `8765`                                      | 라벨링 서버 포트                                                         |
+| `SERVER_ARGS`          | (비움)                                        | 예: `--force-cpu`                                                  |
+| `LABEL_SERVER_URL`     | `http://10.0.2.2:8765`                      | 앱에서 본 라벨링 서버 주소                                                   |
+| `LEGACY_SERVER`        | `D:\02. SSAFY\Hyundai Test\labeling_server` | 이미 설치된 서버 Python 환경 위치. 있으면 그대로 사용                                |
+| `EMULATOR_AVD`         | (비움)                                        | 비우면 이름에 Pleos가 들어간 AVD 자동 선택                                      |
+| `EMULATOR_COLD_BOOT`   | `true`                                      | 저장된 상태 없이 처음부터 부팅(1~3분). 스냅샷 부팅은 일부 PC에서 터치가 먹지 않아 기본값을 `true`로 둠 |
+| `BUILD_ON_START`       | `false`                                     | `true`면 시작할 때마다 앱을 다시 빌드                                          |
+| `ANDROID_SDK`          | (비움)                                        | 비우면 `%LOCALAPPDATA%\Android\Sdk`                                  |
+| `RELEASE_STORE_FILE` 등 | (메뉴 11이 채움)                                 | 제출용 서명 키 위치·비밀번호                                                  |
+| `RELEASE_APP_ID`       | `com.carity.app`                            | 제출용 패키지 이름. 제출 후에는 바꿀 수 없음                                        |
 
 > `.env`는 git에 올리지 마세요. API 키는 빌드된 APK 안에 들어가므로 외부 배포용 빌드에는 넣지 않습니다.
 
@@ -164,19 +178,20 @@ LEGACY_SERVER=                     # 이미 설치된 라벨링 서버 폴더가
 
 ## 문제 해결
 
-| 증상                                  | 해결                                                                                  |
-| ----------------------------------- | ----------------------------------------------------------------------------------- |
-| 앱 버튼을 눌러도 반응이 없음                    | `Carity.bat` → **10) 에뮬레이터 초기화**. 에뮬레이터를 처음 상태로 다시 켜고 앱을 다시 설치합니다.                  |
-| Carity 시뮬레이션을 눌러도 화면이 안 뜸           | 메뉴 1로 다시 시작합니다(권한을 미리 허용해 보이지 않는 권한 창을 막습니다).                                       |
-| 폴더 이름 변경·삭제가 "다른 프로그램에서 사용 중"으로 안 됨 | 메뉴 **8**, Android Studio에서 File > Close Project, 서버 창과 `Carity.bat` 창 닫기 순서로 진행합니다. |
-| 라벨 탭에서 "PC 라벨 서버 연결 실패"             | 메뉴 5로 서버 확인. 꺼져 있으면 메뉴 4. 그래도 안 되면 메뉴 9                                             |
-| 라벨 뷰어 연결 실패                         | 서버 주소가 `http://10.0.2.2:8765`인지 확인, 메뉴 9                                            |
-| "영상 라벨링 데이터가 없음"                    | `.env`의 `DATA_ROOT`가 실제 영상 폴더인지 확인. 메뉴 5에 영상·라벨 개수가 나옵니다.                           |
-| AI 판단이 "연결 실패 → 규칙 엔진 문장 사용"        | Ollama가 꺼져 있거나 첫 응답이 느린 경우입니다. 메뉴 5로 확인합니다. 규칙 판단은 정상 동작합니다.                        |
-| 소리가 안 남                             | 화면의 "음성:" 줄 확인. PC 음성을 쓰려면 라벨링 서버가 켜져 있어야 합니다. PC 볼륨도 확인합니다.                        |
-| "서버 Python 환경 없음"                   | 메뉴 2(처음 설치)                                                                         |
-| 빌드 실패                               | Android Studio로 `android` 폴더를 열어 Gradle Sync 오류를 확인합니다.                             |
-| 에뮬레이터가 켜졌다가 바로 꺼짐                   | 메뉴 10. 계속되면 메뉴 6으로 로그를 저장해 팀에 공유합니다.                                                |
+| 증상                                  | 해결                                                                                    |
+| ----------------------------------- | ------------------------------------------------------------------------------------- |
+| 앱 버튼을 눌러도 반응이 없음                    | `.env`의 `EMULATOR_COLD_BOOT=true`인지 확인하고 에뮬레이터를 닫은 뒤 메뉴 1. 그래도 안 되면 **10) 에뮬레이터 초기화** |
+| 제출용 앱이 실행 직후 꺼짐                     | 2.1.0에서 해결(R8 최적화 끔). 다시 생기면 앱을 한 번 실행한 직후 메뉴 6으로 로그를 저장해 `FATAL` 줄을 확인합니다            |
+| Carity 시뮬레이션을 눌러도 화면이 안 뜸           | 메뉴 1로 다시 시작합니다(권한을 미리 허용해 보이지 않는 권한 창을 막습니다).                                         |
+| 폴더 이름 변경·삭제가 "다른 프로그램에서 사용 중"으로 안 됨 | 메뉴 **8**, Android Studio에서 File > Close Project, 서버 창과 `Carity.bat` 창 닫기 순서로 진행합니다.   |
+| 라벨 탭에서 "PC 라벨 서버 연결 실패"             | 메뉴 5로 서버 확인. 꺼져 있으면 메뉴 4. 그래도 안 되면 메뉴 9                                               |
+| 라벨 뷰어 연결 실패                         | 서버 주소가 `http://10.0.2.2:8765`인지 확인, 메뉴 9                                              |
+| "영상 라벨링 데이터가 없음"                    | `.env`의 `DATA_ROOT`가 실제 영상 폴더인지 확인. 메뉴 5에 영상·라벨 개수가 나옵니다.                             |
+| AI 판단이 "연결 실패 → 규칙 엔진 문장 사용"        | Ollama가 꺼져 있거나 첫 응답이 느린 경우입니다. 메뉴 5로 확인합니다. 규칙 판단은 정상 동작합니다.                          |
+| 소리가 안 남                             | 화면의 "음성:" 줄 확인. PC 음성을 쓰려면 라벨링 서버가 켜져 있어야 합니다. PC 볼륨도 확인합니다.                          |
+| "서버 Python 환경 없음"                   | 메뉴 2(처음 설치)                                                                           |
+| 빌드 실패                               | Android Studio로 `android` 폴더를 열어 Gradle Sync 오류를 확인합니다.                               |
+| 에뮬레이터가 켜졌다가 바로 꺼짐                   | 콜드 부트(`EMULATOR_COLD_BOOT=true`)로 다시 시작, 또는 메뉴 10. 계속되면 메뉴 6으로 로그를 저장해 팀에 공유합니다.      |
 
 ---
 
@@ -209,13 +224,15 @@ cd android
 
 - 에뮬레이터에서 PC 주소는 `10.0.2.2`입니다 (서버 `:8765`, Ollama `:11434`).
 - 앱 로그 태그: `CarityVoice`(음성), `CarityAI`(AI 판단), `CarityLabel`(라벨 장면), `CarityVehicle`(차량 데이터). 전체 목록은 Carity.md 15-4절.
-- 패키지 이름은 `com.example.pleostest`(시뮬레이션·튜토리얼), `com.guardians.viewer`(라벨 뷰어)입니다.
+- 패키지 이름: 개발용 `com.example.pleostest`(시뮬레이션·튜토리얼), `com.guardians.viewer`(라벨 뷰어) / 제출용 `com.carity.app`.
+- 제출용과 개발용을 함께 설치하면 앱 목록에 Carity 시뮬레이션·튜토리얼 아이콘이 두 개씩 보입니다. 개발용 버튼(Console 키보드 등)이 없는 쪽이 제출용입니다.
 
 ## 버전 기록
 
-| 버전    | 날짜         | 내용                                                                          |
-| ----- | ---------- | --------------------------------------------------------------------------- |
-| 2.0.0 | 2026-11-15 | 이름을 Carity로 통일, Carity 아이콘, 기술서 통합, 실행기 메뉴 8·9·10, 서버 환경 재사용, Qwen 응답 대기 개선 |
-| 1.0.0 | 2026-11-14 | Carity ver1 통합: 시뮬레이션 + 라벨 장애물·AI 판단 + 음성 + 튜토리얼 + 라벨 뷰어 + 라벨링 서버 + 통합 실행기  |
+| 버전    | 날짜         | 내용                                                                                                      |
+| ----- | ---------- | ------------------------------------------------------------------------------------------------------- |
+| 2.1.0 | 2026-11-15 | 제출용 APK(`release\Carity-2.0.0.apk`) 빌드·에뮬레이터 실행 검증, 실행 직후 종료 문제 해결(R8 끔), 메뉴 11~13, 콜드 부트 기본값, 로그 수집 확대 |
+| 2.0.0 | 2026-11-15 | 이름을 Carity로 통일, Carity 아이콘, 기술서 통합, 실행기 메뉴 8·9·10, 서버 환경 재사용, Qwen 응답 대기 개선                             |
+| 1.0.0 | 2026-11-14 | Carity ver1 통합: 시뮬레이션 + 라벨 장애물·AI 판단 + 음성 + 튜토리얼 + 라벨 뷰어 + 라벨링 서버 + 통합 실행기                              |
 
 버전 규칙: `주.부.수` (주: 구조·판단 규칙 변경 / 부: 기능 추가 / 수: 수정·문서). 자세한 이력은 [Carity.md 14장](Carity.md#14-변경-이력)을 보세요.

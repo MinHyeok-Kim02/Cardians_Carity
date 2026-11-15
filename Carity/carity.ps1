@@ -11,6 +11,9 @@
     Carity.bat copydata  영상·라벨 데이터를 data 폴더로 복사
     Carity.bat stop      라벨링 서버 종료
     Carity.bat reset     에뮬레이터 초기화 (콜드 부트 + 앱 재설치) · 버튼이 안 눌릴 때
+    Carity.bat releasekey  제출용 서명 키 만들기 (처음 1회)
+    Carity.bat release   Pleos App Market 제출용 APK 빌드 → release\Carity-버전.apk
+    Carity.bat shot      스토어 스크린샷 (에뮬레이터 화면 PNG)
   설정: .env (없으면 .env.example 로 자동 생성)
 #>
 param([string]$Action = '')
@@ -297,7 +300,7 @@ function Show-Status {
 }
 function Collect-Logs {
     $out = Join-Path $LogDir ("app_{0}.txt" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
-    (Adb logcat -d -v time) | Select-String -Pattern 'CarityVoice|CarityAI|CarityLabel|AndroidRuntime|pleostest|guardians' | ForEach-Object { $_.Line } | Select-Object -Last 600 | Out-File $out -Encoding utf8
+    (Adb logcat -d -v time) | Select-String -Pattern 'Carity|carity|AndroidRuntime|pleostest|guardians|FATAL|has died|Force finishing|Start proc|ActivityTaskManager.*START|SecurityException|UxRestriction|distraction' | ForEach-Object { $_.Line } | Select-Object -Last 1500 | Out-File $out -Encoding utf8
     Ok "로그 저장: $out"
 }
 function Diagnose {
@@ -332,6 +335,144 @@ function Copy-Data {
     Ok '완료 → .env 의 DATA_ROOT=data 로 바꾸면 data 폴더를 사용합니다'
 }
 
+# ---------------------------------------------------------------- 제출용(release) APK · Pleos App Market
+$ReleaseDir = Join-Path $Root 'release'
+function Find-JdkTool([string]$name) {
+    $cands = @()
+    if ($env:JAVA_HOME) { $cands += (Join-Path $env:JAVA_HOME "bin\$name.exe") }
+    $cands += "$env:ProgramFiles\Android\Android Studio\jbr\bin\$name.exe"
+    $cands += "$env:ProgramFiles\Android\Android Studio1\jbr\bin\$name.exe"
+    foreach ($c in $cands) { if (Test-Path $c) { return $c } }
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+function Set-EnvValue([string]$key, [string]$value) {
+    $envFile = Join-Path $Root '.env'
+    $lines = @(); if (Test-Path $envFile) { $lines = @(Get-Content $envFile -Encoding UTF8) }
+    $found = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].TrimStart([char]0xFEFF) -match ('^\s*' + [regex]::Escape($key) + '\s*=')) { $lines[$i] = "$key=$value"; $found = $true }
+    }
+    if (-not $found) { $lines += "$key=$value" }
+    [IO.File]::WriteAllLines($envFile, [string[]]$lines, (New-Object Text.UTF8Encoding($false)))
+}
+function Plain([Security.SecureString]$s) {
+    $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
+}
+function Release-StoreFile {
+    $c = Read-Env; $p = $c['RELEASE_STORE_FILE']
+    if (-not $p) { return $null }
+    if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $Root $p }
+    if (Test-Path $p) { return $p } else { return $null }
+}
+function Release-AppId { $c = Read-Env; if ($c['RELEASE_APP_ID']) { return $c['RELEASE_APP_ID'] } else { return 'com.carity.app' } }
+function Build-Tool([string]$name) {
+    $bt = Get-ChildItem (Join-Path $Sdk 'build-tools') -Directory -ErrorAction SilentlyContinue | Sort-Object { try { [version]$_.Name } catch { [version]'0.0' } } -Descending | Select-Object -First 1
+    if (-not $bt) { return $null }
+    foreach ($n in @("$name.bat", "$name.exe", $name)) { $f = Join-Path $bt.FullName $n; if (Test-Path $f) { return $f } }
+    return $null
+}
+
+# 서명 키는 한 번만 만듭니다. 같은 키로 서명해야 이후 업데이트를 낼 수 있습니다.
+function Make-ReleaseKey {
+    Head '제출용 서명 키 만들기 (처음 1회)'
+    New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
+    $ks = Join-Path $ReleaseDir 'carity-release.jks'
+    if (Test-Path $ks) {
+        Warn "이미 키가 있습니다: $ks"
+        Log '  같은 키로 계속 서명해야 앱 업데이트가 됩니다. 정말 새로 만들려면 이 파일을 다른 폴더로 옮긴 뒤 다시 실행하세요.' 'White'
+        if (-not (Release-StoreFile)) { Set-EnvValue 'RELEASE_STORE_FILE' 'release\carity-release.jks'; Log '  .env 의 RELEASE_STORE_FILE 을 이 키로 맞췄습니다. 비밀번호(RELEASE_STORE_PASSWORD)는 직접 확인하세요.' }
+        return
+    }
+    $keytool = Find-JdkTool 'keytool'
+    if (-not $keytool) { Warn 'keytool 을 찾지 못했습니다. Android Studio 가 설치되어 있는지 확인하세요.'; return }
+    Log '  비밀번호는 6자 이상. 이 PC 의 .env 에만 저장되고 git 에는 올라가지 않습니다.' 'White'
+    $s1 = Plain (Read-Host '  키 비밀번호' -AsSecureString)
+    $s2 = Plain (Read-Host '  키 비밀번호 확인' -AsSecureString)
+    if ($s1 -ne $s2) { Warn '두 비밀번호가 다릅니다'; return }
+    if ($s1.Length -lt 6) { Warn '비밀번호는 6자 이상이어야 합니다'; return }
+    $who = (Read-Host '  키에 넣을 개발자/팀 이름 (영문, 엔터 = Carity Team)') -replace '[,=+<>#;"\\]', ' '
+    if (-not $who.Trim()) { $who = 'Carity Team' }
+    & $keytool -genkeypair -keystore $ks -storetype PKCS12 -alias carity -keyalg RSA -keysize 2048 -validity 10000 `
+        -storepass $s1 -keypass $s1 -dname "CN=$($who.Trim()), OU=Carity, O=Carity, C=KR" 2>&1 | Out-Host
+    if (-not (Test-Path $ks)) { Warn '키 생성 실패'; return }
+    Set-EnvValue 'RELEASE_STORE_FILE' 'release\carity-release.jks'
+    Set-EnvValue 'RELEASE_STORE_PASSWORD' $s1
+    Set-EnvValue 'RELEASE_KEY_ALIAS' 'carity'
+    Ok "서명 키 생성: $ks"
+    Warn '키 파일(release\carity-release.jks)과 비밀번호를 잃어버리면 같은 앱으로 업데이트를 낼 수 없습니다. USB 등 다른 곳에 꼭 백업하세요.'
+}
+
+function Build-Release {
+    Head '제출용(release) APK 빌드 · Pleos App Market'
+    $ks = Release-StoreFile
+    if (-not $ks) { Warn '서명 키가 없습니다 → 먼저 Carity.bat releasekey (메뉴 11)'; return }
+    if (-not $env:JAVA_HOME) {
+        foreach ($j in @("$env:ProgramFiles\Android\Android Studio\jbr", "$env:ProgramFiles\Android\Android Studio1\jbr")) { if (Test-Path $j) { $env:JAVA_HOME = $j; break } }
+    }
+    if (-not (Test-Path (Join-Path $Android 'local.properties'))) {
+        "sdk.dir=" + ($Sdk -replace '\\', '\\\\' -replace ':', '\:') | Out-File (Join-Path $Android 'local.properties') -Encoding ascii
+    }
+    Push-Location $Android
+    & .\gradlew.bat ':app:assembleRelease' --console=plain
+    $code = $LASTEXITCODE
+    Pop-Location
+    if ($code -ne 0) { Warn "빌드 실패 (code $code) → 위 오류를 확인하세요"; return }
+    $apk = Join-Path $Android 'app\build\outputs\apk\release\app-release.apk'
+    if (-not (Test-Path $apk)) { Warn '서명된 APK 가 없습니다. app-release-unsigned.apk 만 있다면 .env 의 RELEASE_* 서명 설정을 확인하세요.'; return }
+    $ver = '0'
+    $m = Select-String -Path (Join-Path $Android 'app\build.gradle.kts') -Pattern 'versionName\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if ($m) { $ver = $m.Matches[0].Groups[1].Value }
+    New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
+    $out = Join-Path $ReleaseDir "Carity-$ver.apk"
+    Copy-Item $apk $out -Force
+    $mb = [math]::Round((Get-Item $out).Length / 1MB, 1)
+    $hash = (Get-FileHash $out -Algorithm SHA256).Hash
+    Ok "제출용 APK: $out  ($mb MB · 업로드 제한 600 MB)"
+    $aapt = Build-Tool 'aapt'
+    if ($aapt) { (& $aapt dump badging $out 2>$null) | Select-String '^package:|^application-label:' | ForEach-Object { Log ('  ' + $_.Line) } }
+    $signer = Build-Tool 'apksigner'
+    if ($signer) {
+        $v = (& $signer verify --print-certs $out 2>&1) -join "`n"
+        if ($LASTEXITCODE -eq 0) { Ok '서명 확인 (apksigner verify)'; ($v -split "`n" | Select-Object -First 3) | ForEach-Object { Log "  $_" } } else { Warn "서명 확인 실패: $v" }
+    }
+    @("Carity $ver 제출용 APK", "파일: Carity-$ver.apk", "크기: $mb MB", "SHA-256: $hash", "패키지: $(Release-AppId)", "빌드: $(Get-Date -Format 'yyyy-MM-dd HH:mm')") |
+        Set-Content (Join-Path $ReleaseDir "Carity-$ver.txt") -Encoding UTF8
+    if (Device-Online) {
+        $ans = Read-Host '  에뮬레이터에 설치해서 확인할까요? (y/N)'
+        if ($ans -match '^[yY]') {
+            $r = (Adb install -r $out) -join ' '
+            if ($r -match 'Success') {
+                $id = Release-AppId
+                $user = ((Adb shell am get-current-user) -join '').Trim(); if (-not $user) { $user = '10' }
+                foreach ($perm in @('android.car.permission.CAR_SPEED', 'pleos.car.permission.TTS_SERVICE')) { Adb shell pm grant --user $user $id $perm | Out-Null }
+                Ok "설치 완료 ($id). 앱 목록에 개발용과 이름이 같은 Carity 아이콘이 하나 더 생깁니다."
+            } else { Warn "설치 실패: $r" }
+        }
+    }
+    Log '  다음: release\제출_체크리스트.md 를 보고 Pleos App Market Console 에 등록하세요.' 'White'
+}
+
+# 스토어 스크린샷: 에뮬레이터 화면을 그대로 PNG 로 저장 (가이드 크기: 2560x1380 / 1700x1212 / 840x121)
+function Take-Shot {
+    Head '스토어 스크린샷'
+    if (-not (Device-Online)) { Warn '에뮬레이터 없음'; return }
+    $dir = Join-Path $ReleaseDir 'store'; New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $file = Join-Path $dir ("screen_{0}.png" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    Adb shell screencap -p /sdcard/carity_shot.png | Out-Null
+    Adb pull /sdcard/carity_shot.png $file | Out-Null
+    Adb shell rm /sdcard/carity_shot.png | Out-Null
+    if (-not (Test-Path $file)) { Warn '저장 실패'; return }
+    try {
+        Add-Type -AssemblyName System.Drawing
+        $img = [Drawing.Image]::FromFile($file); $w = $img.Width; $h = $img.Height; $img.Dispose()
+        $okSize = @('2560x1380', '1700x1212', '840x121') -contains "${w}x${h}"
+        if ($okSize) { Ok "저장: $file (${w}x${h})" } else { Warn "저장: $file (${w}x${h}) · 가이드 크기(2560x1380 / 1700x1212 / 840x121)와 다릅니다" }
+    } catch { Ok "저장: $file" }
+}
+
 # ---------------------------------------------------------------- 실행
 function Do-Start {
     Head 'Carity 전체 시작'
@@ -358,9 +499,10 @@ if (-not $Action) {
     Write-Host '  Carity · 좁은 길 통과 보조' -ForegroundColor Cyan
     Write-Host '  1) 전체 시작   2) 처음 설치   3) 앱 빌드·설치   4) 서버만 실행'
     Write-Host '  5) 상태 점검   6) 로그 수집   7) 데이터 복사    8) 전체 종료(파일 잠금 해제)   9) 네트워크 진단'
-    Write-Host '  10) 에뮬레이터 초기화(버튼이 안 눌릴 때: 콜드 부트 + 앱 재설치)   0) 나가기'
+    Write-Host '  10) 에뮬레이터 초기화(버튼이 안 눌릴 때: 콜드 부트 + 앱 재설치)'
+    Write-Host '  [제출용] 11) 서명 키 만들기(처음 1회)   12) 제출용 APK 빌드   13) 스토어 스크린샷   0) 나가기'
     $sel = Read-Host '  번호'
-    $Action = @{ '1' = 'start'; '2' = 'setup'; '3' = 'build'; '4' = 'server'; '5' = 'status'; '6' = 'logs'; '7' = 'copydata'; '8' = 'stopall'; '9' = 'diag'; '10' = 'reset' }[$sel]
+    $Action = @{ '1' = 'start'; '2' = 'setup'; '3' = 'build'; '4' = 'server'; '5' = 'status'; '6' = 'logs'; '7' = 'copydata'; '8' = 'stopall'; '9' = 'diag'; '10' = 'reset'; '11' = 'releasekey'; '12' = 'release'; '13' = 'shot' }[$sel]
     if (-not $Action) { exit 0 }
 }
 switch ($Action.ToLower()) {
@@ -375,5 +517,8 @@ switch ($Action.ToLower()) {
     'stopall' { Stop-All }
     'diag' { Diagnose }
     'reset' { Do-Reset }
+    'releasekey' { Make-ReleaseKey }
+    'release' { Build-Release }
+    'shot' { Take-Shot }
     default { Write-Host "알 수 없는 명령: $Action" }
 }

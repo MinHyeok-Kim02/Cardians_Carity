@@ -139,7 +139,7 @@ class AlleyVoiceCoach(context: Context) {
             Log.i("CarityVoice", "PLEOS_TTS_JUDGE key=$key message=$message")
             return true
         }
-        if (!ready) {   // 기기 TTS 엔진이 없으면(에뮬레이터) PC 라벨링 서버의 Windows 한국어 음성으로 재생
+        if (!ready && CarityFeatures.pcServerEnabled) {   // 기기 TTS 엔진이 없으면(에뮬레이터) PC 라벨링 서버의 Windows 한국어 음성으로 재생
             lastKey = key; spokenAt = now
             speakViaPc(key, message)
             return true

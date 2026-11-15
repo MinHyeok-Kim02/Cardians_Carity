@@ -93,6 +93,10 @@ class MainActivity : AppCompatActivity() {
         }    }
 
     private fun locationAction() {
+        if (!CarityFeatures.locationEnabled) {
+            alleyScreen.showLocation("이 버전에서는 위치 기능을 사용하지 않습니다", false)
+            return
+        }
         if (locationSource.active) {
             locationWanted = false
             locationSource.stop()

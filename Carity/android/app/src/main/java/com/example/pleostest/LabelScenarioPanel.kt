@@ -78,7 +78,9 @@ class LabelScenarioPanel(context: Context, private val host: Host) : ScrollView(
         configure(tutorialButton, "튜토리얼로 보기") { openTutorial() }
         configure(speakButton, "판단 음성 듣기") { host.replayJudgement() }
         configure(aiButton, "AI 다시 판단") { host.requestAi() }
-        status.text = "PC 라벨 서버: ${catalog.repo.serverUrl}"
+        status.text = if (CarityFeatures.pcServerEnabled) "PC 라벨 서버: ${catalog.repo.serverUrl}" else "라벨 장면: 앱 내장 ${catalog.repo.bundledSamples().size}개"
+        if (!CarityFeatures.pcServerEnabled) serverButton.visibility = GONE
+        if (!CarityFeatures.aiEnabled) aiButton.visibility = GONE
     }
 
     private var providerLabel = ""
@@ -148,8 +150,9 @@ class LabelScenarioPanel(context: Context, private val host: Host) : ScrollView(
         aiText.text = if (r.ok) "${r.provider} · ${r.latencyMs}ms · AI 권고 ${r.action?.ko ?: "-"}" +
             (if (f.aiAgrees == false) " (규칙과 다름 → 규칙 유지)" else "") +
             "\n음성: ${f.speech}\n근거: ${r.reason ?: "-"}\n재생 출처: ${f.source}"
+        else if (r.error == AiJudge.DISABLED) "규칙 엔진 문장으로 안내합니다\n음성: ${f.speech}"
         else "${r.provider} 연결 실패 → 규칙 엔진 문장 사용\n${r.error}\n음성: ${f.speech}"
-        aiText.setTextColor(if (r.ok) ink else amber)
+        aiText.setTextColor(if (r.ok || r.error == AiJudge.DISABLED) ink else amber)
     }
 
     private fun showChooser() {
